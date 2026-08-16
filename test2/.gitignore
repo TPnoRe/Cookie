@@ -1,0 +1,15 @@
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+*.egg-info/
+.DS_Store
+config.json
+.ocr_daemon_port
+.ocr_daemon.pid
+.ocr_ready
+emulator/debug/
+*/emulator/debug/
+*.log
+crash.log
