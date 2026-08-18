@@ -3,6 +3,7 @@ import time
 import logging
 
 from vision.engine import VisionEngine
+from game.state import BotState
 
 log = logging.getLogger(__name__)
 
@@ -32,15 +33,17 @@ class PrepHandler:
             norm_text = text.replace(' ', '').lower()
             norm_target = target.replace(' ', '').lower()
             if norm_target in norm_text:
-                self.bot.log_message.emit(
-                    'ok', 'Prep: [boost_step=%d] target buff found: "%s"!'
-                    % (self._boost_step, text))
+                #self.bot.log_message.emit('ok', 'Prep: [boost_step=%d] target buff found: "%s"!'% (self._boost_step, text))
                 # แตะยืนยันบัฟ หรือกด Start Game
                 self._tap('SelectFo')
                 self._boost_step = 3
                 self._multi_buy_clicked = False
-                time.sleep(0.3)
+                #time.sleep(0.3)
                 self._tap('Start Game')
+                # Force state = gameplay ทันที
+                time.sleep(0.5)
+                self.bot.state = BotState('gameplay')
+                self.bot._force_until = time.time() + 3                
                 return
 
         # ──────────────────────────────────────────────────────
@@ -52,8 +55,7 @@ class PrepHandler:
             if self._relay_step == 0:
                 result = self._detect(screenshot, view_w, view_h, 'Select Cookie Relay', threshold=0.65)
                 if result and result.get('found'):
-                    self.bot.log_message.emit(
-                        'info', 'Prep: [relay_step=0] tapping Select Cookie Relay')
+                    #self.bot.log_message.emit('info', 'Prep: [relay_step=0] tapping Select Cookie Relay')
                     self._tap('Select Cookie Relay')
                     self._relay_step = 1
                     return
@@ -62,16 +64,14 @@ class PrepHandler:
             if self._relay_step == 1:
                 result = self._detect(screenshot, view_w, view_h, 'Buy Cookie Relay', threshold=0.65)
                 if result and result.get('found'):
-                    self.bot.log_message.emit(
-                        'info', 'Prep: [relay_step=1] tapping Buy Cookie Relay')
+                    #self.bot.log_message.emit('info', 'Prep: [relay_step=1] tapping Buy Cookie Relay')
                     self._tap('Buy Cookie Relay')
                     self._relay_step = 2
                     return
                 # ถ้าไม่เห็น Buy → อาจกด Select ไม่ติด ลองใหม่
                 result2 = self._detect(screenshot, view_w, view_h, 'Select Cookie Relay', threshold=0.65)
                 if result2 and result2.get('found'):
-                    self.bot.log_message.emit(
-                        'warn', 'Prep: [relay_step=1] retry Select Cookie Relay')
+                    #self.bot.log_message.emit('warn', 'Prep: [relay_step=1] retry Select Cookie Relay')
                     self._tap('Select Cookie Relay')
                     return
 
@@ -83,9 +83,7 @@ class PrepHandler:
             if self._boost_step == 0:
                 result = self._detect(screenshot, view_w, view_h, 'Random Boost', threshold=0.65)
                 if result and result.get('found'):
-                    self.bot.log_message.emit(
-                        'info', 'Prep: [boost_step=0] tapping Random Boost (conf=%.2f)'
-                        % result.get('confidence', 0.0))
+                    #self.bot.log_message.emit('info', 'Prep: [boost_step=0] tapping Random Boost (conf=%.2f)'% result.get('confidence', 0.0))
                     self._tap('Random Boost')
                     self._boost_step = 1
                     self._multi_buy_clicked = False
@@ -96,9 +94,7 @@ class PrepHandler:
             if self._boost_step == 1:
                 result = self._detect(screenshot, view_w, view_h, 'Multi Tab', threshold=0.60)
                 if result and result.get('found'):
-                    self.bot.log_message.emit(
-                        'info', 'Prep: [boost_step=1] tapping Multi Tab (conf=%.2f)'
-                        % result.get('confidence', 0.0))
+                    #self.bot.log_message.emit('info', 'Prep: [boost_step=1] tapping Multi Tab (conf=%.2f)'% result.get('confidence', 0.0))
                     self._tap('Multi Tab')
                     self._boost_step = 2
                     self._multi_buy_clicked = False
@@ -111,9 +107,7 @@ class PrepHandler:
                 if self._retry_count > 3:
                     result2 = self._detect(screenshot, view_w, view_h, 'Random Boost', threshold=0.65)
                     if result2 and result2.get('found'):
-                        self.bot.log_message.emit(
-                            'warn', 'Prep: [boost_step=1] retry Random Boost (retry_count=%d)'
-                            % self._retry_count)
+                        #self.bot.log_message.emit('warn', 'Prep: [boost_step=1] retry Random Boost (retry_count=%d)'% self._retry_count)
                         self._tap('Random Boost')
                         self._retry_count = 0
                 return  # ยังไม่เสร็จ boost → ห้ามกด Start Game
@@ -127,8 +121,7 @@ class PrepHandler:
                     conf = result_mb.get('confidence', 0.0)
                     now = time.time()
                     if not self._multi_buy_clicked:
-                        self.bot.log_message.emit(
-                            'info', 'Prep: [boost_step=2] tapping Multi Buy (conf=%.2f), waiting for target buff...' % conf)
+                        #self.bot.log_message.emit('info', 'Prep: [boost_step=2] tapping Multi Buy (conf=%.2f), waiting for target buff...' % conf)
                         self._tap('Multi Buy')
                         self._multi_buy_clicked = True
                         self._last_roll_time = now
@@ -137,8 +130,7 @@ class PrepHandler:
                         return
                     elif now - self._last_roll_time >= 1.5:
                         # กดพลาด (ปุ่ม Multi Buy ยังคงอยู่หลังจากกดไปแล้ว 1.5 วิ) -> ให้กด Multi Buy ซ้ำเฉพาะตอนกดพลาด
-                        self.bot.log_message.emit(
-                            'warn', 'Prep: [boost_step=2] retry Multi Buy (missed previous tap, conf=%.2f)' % conf)
+                        #self.bot.log_message.emit('warn', 'Prep: [boost_step=2] retry Multi Buy (missed previous tap, conf=%.2f)' % conf)
                         self._tap('Multi Buy')
                         self._last_roll_time = now
                         self._retry_count = 0
@@ -157,8 +149,7 @@ class PrepHandler:
                     self._retry_count += 1
                     if self._retry_count > 3:
                         # หากไม่เจอ Multi Buy ให้กด Random Boost > Multi Tab ใหม่อีกรอบ
-                        self.bot.log_message.emit(
-                            'warn', 'Prep: [boost_step=2] Multi Buy not found -> restarting Random Boost flow')
+                        #self.bot.log_message.emit('warn', 'Prep: [boost_step=2] Multi Buy not found -> restarting Random Boost flow')
                         self._boost_step = 0
                         self._multi_buy_clicked = False
                         self._retry_count = 0
@@ -169,10 +160,13 @@ class PrepHandler:
         # ──────────────────────────────────────────────────────
         result = self._detect(screenshot, view_w, view_h, 'Start Game', threshold=0.65)
         if result and result.get('found'):
-            self.bot.log_message.emit(
-                'info', 'Prep: [boost_step=%d] pressing Start Game' % self._boost_step)
+            #self.bot.log_message.emit('info', 'Prep: [boost_step=%d] pressing Start Game' % self._boost_step)
             self._tap('Start Game')
-
+            # Force state = gameplay ทันที
+            time.sleep(0.5)
+            self.bot.state = BotState('gameplay')
+            self.bot._force_until = time.time() + 3
+            
     def _detect(self, screenshot, view_w, view_h, point_name, stage='prep', threshold=0.75):
         cfg = self.app.config
         coords = cfg.get_coords(stage)
@@ -192,10 +186,8 @@ class PrepHandler:
             if p[0] == point_name:
                 self.app.emulator.tap(p[1], p[2])
                 lc = self.app.emulator.last_click
-                if lc:
-                    self.bot.log_message.emit(
-                        'info', 'Prep: tapped %s @ x=%.1f y=%.1f'
-                        % (point_name, lc[0], lc[1]))
+                #if lc:
+                    #self.bot.log_message.emit('info', 'Prep: tapped %s @ x=%.1f y=%.1f'% (point_name, lc[0], lc[1]))
                 time.sleep(0.3)
                 return True
         return False

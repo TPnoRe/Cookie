@@ -149,3 +149,28 @@ class TapEngine:
             render_hwnd, win32con.WM_LBUTTONDOWN, win32con.MK_LBUTTON, lparam)
         time.sleep(0.05)
         win32gui.PostMessage(render_hwnd, win32con.WM_LBUTTONUP, 0, lparam)
+        
+    # ── Tap Fast (delay สั้น) ──
+    def tap_fast(self, x_pct, y_pct):
+        """กดเร็ว — delay 0.05-0.15s, hold 50ms."""
+        if not self.hwnd:
+            return False
+        size = self._get_size()
+        if not size:
+            return False
+        width, height = size
+        cx, cy = pct_to_px(width, height, x_pct, y_pct)
+        try:
+            time.sleep(random.uniform(0.05, 0.15))
+            lparam = ((int(cy) & 0xFFFF) << 16) | (int(cx) & 0xFFFF)
+            self.last_tap_x = cx
+            self.last_tap_y = cy
+            log.debug('tap_fast @ (%d, %d)' % (cx, cy))
+            win32gui.PostMessage(self.hwnd, win32con.WM_MOUSEMOVE, 0, lparam)
+            win32gui.PostMessage(
+                self.hwnd, win32con.WM_LBUTTONDOWN, win32con.MK_LBUTTON, lparam)
+            time.sleep(0.05)
+            win32gui.PostMessage(self.hwnd, win32con.WM_LBUTTONUP, 0, lparam)
+            return True
+        except Exception:
+            return False

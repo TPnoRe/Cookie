@@ -58,6 +58,7 @@ FARM_MODES = [
     ('farm_gold', 'Farm Gold'),
     ('farm_exp', 'Farm EXP'),
     ('farm_box', 'Farm Box (no jump)'),
+    ('open_gitbox', 'Open Gitbox'),
 ]
 
 BUFFS = [

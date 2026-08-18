@@ -32,7 +32,6 @@ class GameplayHandler:
         if cookie_relay_enabled:
             result = self._detect(screenshot, view_w, view_h, 'Cookie Relay')
             if result and result.get('found'):
-                self.bot.log_message.emit('ok', 'Gameplay: Cookie Relay detected')
                 for _ in range(5):
                     self._tap('Cookie Relay')
                     time.sleep(0.1)
@@ -42,7 +41,7 @@ class GameplayHandler:
         if fast_start_enabled:
             result = self._detect(screenshot, view_w, view_h, 'Fast Start')
             if result and result.get('found'):
-                self.bot.log_message.emit('info', 'Gameplay: Fast Start! waiting %.1fs...' % fast_start_delay)
+                #self.bot.log_message.emit('info', 'Gameplay: Fast Start! waiting %.1fs...' % fast_start_delay)
                 time.sleep(fast_start_delay)
                 self._tap('Fast Start')
                 return
@@ -88,7 +87,10 @@ class GameplayHandler:
         coords = cfg.get_coords('gameplay')
         for p in coords:
             if p[0] == point_name:
-                self.app.emulator.tap(p[1], p[2])
+                if point_name in ('Cookie Relay', 'Fast Start'):
+                    self.app.emulator.tap_fast(p[1], p[2])
+                else:
+                    self.app.emulator.tap(p[1], p[2])
                 lc = self.app.emulator.last_click
                 if lc:
                     self.bot.log_message.emit(

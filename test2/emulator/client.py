@@ -182,3 +182,23 @@ class EmulatorClient:
             self.last_click = px_to_pct(width, height, x, y) + (
                 time.time(),)
         return ok
+
+    def tap_fast(self, x_pct, y_pct):
+        """กดเร็ว — ไม่มี jitter, hold สั้น."""
+        if not self.connected or not self.hwnd:
+            return False
+        size = self.get_size()
+        if not size:
+            return False
+        ok = self.tap_engine.tap_fast(x_pct, y_pct)
+        if ok:
+            width, height = size
+            ax = self.tap_engine.last_tap_x
+            ay = self.tap_engine.last_tap_y
+            if ax is not None and ay is not None:
+                self.last_click = (
+                    round(ax / width * 100.0, 2),
+                    round(ay / height * 100.0, 2),
+                    time.time(),
+                )
+        return ok
