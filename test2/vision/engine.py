@@ -152,22 +152,30 @@ class VisionEngine:
         if roi is None:
             return None
 
-        target_w, target_h = resize_to
-        roi_pil = Image.fromarray(cv2.cvtColor(roi, cv2.COLOR_BGR2RGB))
-        roi_resized = roi_pil.resize((target_w, target_h), Image.LANCZOS)
+        h, w = roi.shape[:2]
+        scale = max(2.5, min(4.0, 70.0 / max(h, 1)))
+        new_w = max(int(w * scale), 1)
+        new_h = max(int(h * scale), 1)
+        roi_resized = cv2.resize(roi, (new_w, new_h), interpolation=cv2.INTER_LANCZOS4)
 
-        roi_gray = roi_resized.convert('L')
-        roi_np = np.array(roi_gray)
+        roi_gray = cv2.cvtColor(roi_resized, cv2.COLOR_BGR2GRAY)
         _, roi_thresh = cv2.threshold(
-            roi_np, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+            roi_gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+
+        edge_pixels = np.concatenate(
+            [roi_thresh[0, :], roi_thresh[-1, :], roi_thresh[:, 0], roi_thresh[:, -1]])
+        if np.mean(edge_pixels) < 127:
+            roi_thresh = cv2.bitwise_not(roi_thresh)
+
+        pad = 16
+        padded = cv2.copyMakeBorder(
+            roi_thresh, pad, pad, pad, pad, cv2.BORDER_CONSTANT, value=255)
 
         try:
             import pytesseract
             text = pytesseract.image_to_string(
-                Image.fromarray(roi_thresh),
-                config='--psm 7 -c tessedit_char_whitelist='
-                       '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ'
-                       'abcdefghijklmnopqrstuvwxyz %+-.,/:'
+                Image.fromarray(padded),
+                config='--psm 7'
             ).strip()
         except ImportError:
             text = '[pytesseract not installed]'

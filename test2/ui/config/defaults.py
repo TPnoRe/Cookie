@@ -12,6 +12,7 @@ DEFAULT_SETTINGS = {
     'fast_start': True,
     'fast_start_delay': '1.0',
     'cookie_relay': True,
+    'random_boost': True,
     'target_buff': 'Double Coins',
     'buff_list': [
         'Double Coins', '15% Score Bonus', '-15% HP drain',
@@ -35,7 +36,7 @@ DEFAULT_COORDINATES = {
         ['Start Game', 69.9, 85.2, 30.0, 12.0],
         ['Boost Scan', 85.4, 27.4, 7.2, 10.6],
         ['Multi Buy', 49.8, 82.0, 17.0, 7.7],
-        ['SelectFo', 70.6, 74.9, 28.2, 9.8],
+        ['SelectFo', 68.4, 75.4, 25.8, 5.3],
         ['Template Prep', 21.6, 15.9, 18.1, 5.5],
     ],
     'gameplay': [

@@ -215,6 +215,8 @@ class App:
         self.dashboard_push(
             'ok' if ok else 'warn',
             'Settings saved%s' % ('' if ok else ' (write failed)'))
+        if self._bot_thread and self._running:
+            self._bot_thread.on_settings_updated()
 
     def test_coordinate(self, stage, index):
         coord = self.pages.get('coordinates')

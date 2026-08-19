@@ -184,6 +184,13 @@ class Settings(QFrame):
         card, v = self._section('AUTO PURCHASE & BUFFS', '\u2694')
         self.layout().addWidget(card, 0, 1)
 
+        sw = ToggleSwitch(card, checked=True)
+        self._switches['random_boost'] = sw
+        v.addWidget(SettingRow(card, 'Random Boost',
+                               'Randomize buff before start',
+                               control=sw))
+        v.addSpacing(6)
+
         lbl = QLabel('TARGET BUFF', card)
         lbl.setFont(theme.qfont(*theme.XS_FONT))
         lbl.setProperty('role', 'muted')
@@ -257,6 +264,7 @@ class Settings(QFrame):
             'fast_start_delay': self._num_fields['fast_start_delay'].text(),
             'fast_start': self._switches['fast_start'].isChecked(),
             'cookie_relay': self._switches['cookie_relay'].isChecked(),
+            'random_boost': self._switches['random_boost'].isChecked(),
             'target_buff': self.buff_menu.current_text(),
         }
         self.save_lbl.setText('\u2713  Settings saved')
@@ -281,6 +289,7 @@ class Settings(QFrame):
         self._num_fields['fast_start_delay'].setText('1.0')
         self._switches['fast_start'].setChecked(True)
         self._switches['cookie_relay'].setChecked(True)
+        self._switches['random_boost'].setChecked(True)
         self.buff_menu.set_current('Double Coins')
         self.save_lbl.setText('')
         if hasattr(self.app, 'show_toast'):

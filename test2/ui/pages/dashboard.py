@@ -417,7 +417,8 @@ class Dashboard(QFrame):
 
     def _on_start(self):
         if hasattr(self.app, 'start_bot'):
-            self.app.start_bot()
+            farm_mode = self.app.config.settings.get('farm_mode', 'farm_gold')
+            self.app.start_bot(farm_mode)
         self.btn_start.setEnabled(False)
         self.btn_stop.setEnabled(True)
         self._session_timer.start(1000)

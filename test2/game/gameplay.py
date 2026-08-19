@@ -1,4 +1,4 @@
-"""game/gameplay.py -- Gameplay stage handler."""
+﻿"""game/gameplay.py -- Gameplay stage handler."""
 import time
 import random
 import logging
@@ -15,20 +15,20 @@ class GameplayHandler:
         self.bot = bot
         self.app = bot.app
         self.engine = VisionEngine()
-        self.farm_mode = bot.farm_mode
-        self.jump_enabled = self.farm_mode in ('farm_gold', 'farm_exp')
         self._last_jump_time = 0
-        self._jump_interval = float(
-            self.app.config.settings.get('jump_interval', '0.8'))
 
     def _get_setting(self, key, default):
         return self.app.config.settings.get(key, default)
 
     def run(self, screenshot, view_w, view_h):
+        farm_mode = self._get_setting('farm_mode', self.bot.farm_mode)
+        jump_enabled = farm_mode in ('farm_gold', 'farm_exp')
+        jump_interval = float(self._get_setting('jump_interval', '0.8'))
         cookie_relay_enabled = bool(self._get_setting('cookie_relay', True))
         fast_start_enabled = bool(self._get_setting('fast_start', True))
         fast_start_delay = float(self._get_setting('fast_start_delay', '1.0'))
 
+        # Priority 1: Cookie Relay
         if cookie_relay_enabled:
             result = self._detect(screenshot, view_w, view_h, 'Cookie Relay')
             if result and result.get('found'):
@@ -41,15 +41,14 @@ class GameplayHandler:
         if fast_start_enabled:
             result = self._detect(screenshot, view_w, view_h, 'Fast Start')
             if result and result.get('found'):
-                #self.bot.log_message.emit('info', 'Gameplay: Fast Start! waiting %.1fs...' % fast_start_delay)
                 time.sleep(fast_start_delay)
                 self._tap('Fast Start')
                 return
 
         # Priority 3: Jump (if enabled)
-        if self.jump_enabled:
+        if jump_enabled:
             now = time.time()
-            if now - self._last_jump_time >= self._jump_interval:
+            if now - self._last_jump_time >= jump_interval:
                 if self._detect_pit(screenshot, view_w, view_h):
                     self._double_jump()
                 else:

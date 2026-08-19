@@ -11,7 +11,7 @@
 import time
 from typing import List, Optional
 from PyQt6.QtCore import Qt, QTimer, QPoint, QObject, pyqtSignal, QRectF, QThread
-from PyQt6.QtGui import QColor, QPainter, QPen, QBrush, QGuiApplication
+from PyQt6.QtGui import QColor, QPainter, QPen, QBrush
 from PyQt6.QtWidgets import QWidget, QApplication
 import win32gui
 import win32con
@@ -51,6 +51,7 @@ class TouchOverlay(QWidget):
         self._touches: List[_TouchPoint] = []
         self._emitter = _TouchSignalEmitter()
         self._emitter.show_touch_requested.connect(self._on_show_touch, Qt.ConnectionType.QueuedConnection)
+        self._emulator_hwnd = 0
 
         # ตั้งค่า Window flags: ไม่แสดงบน taskbar, อยู่บนสุดเสมอ, ไม่มีกรอบ, ไม่รับเมาส์
         self.setWindowFlags(
@@ -64,7 +65,7 @@ class TouchOverlay(QWidget):
         self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating, True)
         self.setAttribute(Qt.WidgetAttribute.WA_NoSystemBackground, True)
 
-        self._update_geometry()
+        self.setGeometry(0, 0, 1, 1)
 
         # Timer สำหรับ Animation Loop 60fps
         self._anim_timer = QTimer(self)
@@ -86,19 +87,22 @@ class TouchOverlay(QWidget):
         except Exception:
             pass
 
-    def _update_geometry(self):
-        """ขยาย Overlay ให้ครอบคลุมทุกจอ."""
+    def _update_geometry(self, hwnd=0):
+        """ขยาย Overlay ให้ครอบเฉพาะ client area ของ Emulator."""
+        if hwnd:
+            self._emulator_hwnd = hwnd
         try:
-            screens = QGuiApplication.screens()
-            if screens:
-                combined_rect = screens[0].geometry()
-                for s in screens[1:]:
-                    combined_rect = combined_rect.united(s.geometry())
-                self.setGeometry(combined_rect)
-            else:
-                self.setGeometry(0, 0, 1920, 1080)
+            h = self._emulator_hwnd or hwnd
+            if h and win32gui.IsWindow(h):
+                left, top, right, bottom = win32gui.GetClientRect(h)
+                w, ht = right - left, bottom - top
+                if w > 0 and ht > 0:
+                    sx, sy = win32gui.ClientToScreen(h, (0, 0))
+                    self.setGeometry(sx, sy, w, ht)
+                    return
         except Exception:
-            self.setGeometry(0, 0, 1920, 1080)
+            pass
+        self.setGeometry(0, 0, 1, 1)
 
     def _is_occluded(self, hwnd: int, screen_x: int, screen_y: int) -> bool:
         """ตรวจสอบว่าตำแหน่ง (screen_x, screen_y) ถูกหน้าต่างโปรแกรมอื่นบดบังหรือไม่."""
@@ -159,7 +163,7 @@ class TouchOverlay(QWidget):
         try:
             if hwnd and self._is_occluded(hwnd, x, y):
                 return
-            self._update_geometry()
+            self._update_geometry(hwnd)
             self._touches.append(_TouchPoint(x, y, duration_ms, color, hwnd))
             if not self.isVisible():
                 self.show()
@@ -189,8 +193,7 @@ class TouchOverlay(QWidget):
             painter = QPainter(self)
             painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
 
-            top_left = self.geometry().topLeft()
-            ox, oy = top_left.x(), top_left.y()
+            ox, oy = self.geometry().x(), self.geometry().y()
 
             for t in self._touches:
 

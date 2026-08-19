@@ -72,9 +72,9 @@ class BotThread(QThread):
 
                     self.state = BotState(stage)
                     self.stage_changed.emit(stage)
-                    self.log_message.emit('info', 'Stage: %s -> %s' % (old, stage))
+                    self.log_message.emit('ok', 'Stage: %s -> %s' % (old, stage))
 
-                    if stage == 'prep':
+                    if stage == 'prep' and old in ('results', 'lobby', 'idle'):
                         prep_h = self._handlers.get('prep')
                         if prep_h:
                             prep_h._relay_step = 0
@@ -134,6 +134,15 @@ class BotThread(QThread):
     def stop(self):
         self._stop_flag = True
 
+    def on_settings_updated(self):
+        """Called when settings are saved while bot is running."""
+        new_mode = self.app.config.settings.get('farm_mode', self.farm_mode)
+        if new_mode != self.farm_mode:
+            self.farm_mode = new_mode
+            self.log_message.emit('ok', 'Bot settings updated (Mode: %s)' % self.farm_mode)
+        else:
+            self.log_message.emit('ok', 'Bot settings updated (Live reload)')
+
     def reset(self):
         self.state = BotState.IDLE
         self._force_until = 0
@@ -167,21 +176,20 @@ class BotThread(QThread):
                 return 'gameplay'
             if self._handlers['results']._check_results(screenshot, view_w, view_h):
                 return 'results'
-            # fallback: ตรวจทุก state
-            for stage_name in ['results', 'prep', 'lobby']:
-                check = getattr(self._handlers.get(stage_name), '_check_%s' % stage_name, None)
-                if check and check(screenshot, view_w, view_h):
-                    return stage_name
-            return current
+            if self._handlers['lobby']._check_lobby(screenshot, view_w, view_h):
+                return 'lobby'
+            # ระหว่าง gameplay ถ้า momentary frame ตรวจไม่เจอปุ่ม ให้คงสถานะ gameplay ไว้
+            return 'gameplay'
 
         if current == 'results':
             if self._handlers['results']._check_results(screenshot, view_w, view_h):
                 return 'results'
-            # fallback: ตรวจทุก state
-            for stage_name in ['prep', 'lobby', 'gameplay']:
-                check = getattr(self._handlers.get(stage_name), '_check_%s' % stage_name, None)
-                if check and check(screenshot, view_w, view_h):
-                    return stage_name
+            if self._handlers['lobby']._check_lobby(screenshot, view_w, view_h):
+                return 'lobby'
+            if self._handlers['prep']._check_prep(screenshot, view_w, view_h):
+                return 'prep'
+            if self._handlers['gameplay']._check_gameplay(screenshot, view_w, view_h):
+                return 'gameplay'
             return current
 
         if current == 'prep':
@@ -189,11 +197,10 @@ class BotThread(QThread):
                 return 'prep'
             if self._handlers['gameplay']._check_gameplay(screenshot, view_w, view_h):
                 return 'gameplay'
-            # fallback: ตรวจทุก state
-            for stage_name in ['results', 'lobby']:
-                check = getattr(self._handlers.get(stage_name), '_check_%s' % stage_name, None)
-                if check and check(screenshot, view_w, view_h):
-                    return stage_name
+            if self._handlers['lobby']._check_lobby(screenshot, view_w, view_h):
+                return 'lobby'
+            if self._handlers['results']._check_results(screenshot, view_w, view_h):
+                return 'results'
             return current
 
         # idle/lobby → ตรวจทุกตัว
