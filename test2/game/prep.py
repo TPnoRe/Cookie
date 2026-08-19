@@ -119,14 +119,14 @@ class PrepHandler:
                 result = self._detect(screenshot, view_w, view_h, 'Start Game', threshold=0.30)
                 if result and result.get('found'):
                     self.bot.log_message.emit('ok', f'Prep: pressing Start Game (attempt {attempt + 1})')
-                    self._tap('Start Game')
+                    self._tap_reliable('Start Game')  # double-tap: PostMessage + SendMessage
                     # Verify that the bot has moved to gameplay; if not, retry tap up to 2 extra times
                     for verify in range(2):
                         time.sleep(0.4)
                         if self.bot.state.value == 'gameplay':
                             break
                         self.bot.log_message.emit('warn', f'Prep: Start Game tap did not change stage, retry {verify + 1}')
-                        self._tap('Start Game')
+                        self._tap_reliable('Start Game')
                     self.bot.state = BotState('gameplay')
                     self.bot._force_until = time.time() + 2
                     return
@@ -134,7 +134,7 @@ class PrepHandler:
                 time.sleep(0.3)
             # After all attempts, log warning and perform a final forced tap
             self.bot.log_message.emit('warning', 'Prep: Start Game button not reliably detected, performing forced tap')
-            self._tap('Start Game')
+            self._tap_reliable('Start Game')
             time.sleep(0.5)
             self.bot.state = BotState('gameplay')
             self.bot._force_until = time.time() + 2
@@ -159,12 +159,25 @@ class PrepHandler:
         for p in coords:
             if p[0] == point_name:
                 self.app.emulator.tap(p[1], p[2])
-                lc = self.app.emulator.last_click
-                #if lc:
-                    #self.bot.log_message.emit('info', 'Prep: tapped %s @ x=%.1f y=%.1f'% (point_name, lc[0], lc[1]))
                 time.sleep(0.3)
                 return True
         return False
+
+    def _tap_reliable(self, point_name, stage='prep'):
+        """กดปุ่มสำคัญด้วย tap_reliable (PostMessage + SendMessage double-tap)."""
+        cfg = self.app.config
+        coords = cfg.get_coords(stage)
+        for p in coords:
+            if p[0] == point_name:
+                te = self.app.emulator.tap_engine
+                if te and hasattr(te, 'tap_reliable'):
+                    te.tap_reliable(p[1], p[2])
+                else:
+                    self.app.emulator.tap(p[1], p[2])
+                time.sleep(0.3)
+                return True
+        return False
+
 
     def _check_prep(self, screenshot, view_w, view_h):
         """Check if on prep screen."""
