@@ -68,7 +68,6 @@ class BotThread(QThread):
                         if prep_h:
                             prep_h._relay_step = 0
                             prep_h._boost_step = 0
-                            prep_h._multi_buy_clicked = False
 
                     self.state = BotState(stage)
                     self.stage_changed.emit(stage)
@@ -79,7 +78,6 @@ class BotThread(QThread):
                         if prep_h:
                             prep_h._relay_step = 0
                             prep_h._boost_step = 0
-                            prep_h._multi_buy_clicked = False
 
                 if stage in self._handlers:
                     self._handlers[stage].run(screenshot, view_w, view_h)

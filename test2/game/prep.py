@@ -15,18 +15,16 @@ class PrepHandler:
         self.bot = bot
         self.app = bot.app
         self.engine = VisionEngine()
-        self._relay_step = 0   # 0=not started, 1=selected, 2=done
-        self._boost_step = 0   # 0=not started, 1=random clicked, 2=in multi tab / waiting buff, 3=done / start game
-        self._multi_buy_clicked = False
+        self._relay_step = 0
+        self._boost_step = 0
         self._retry_count = 0
-        self._last_roll_time = 0
+        self._roll_time = 0
 
     def reset(self):
         self._relay_step = 0
         self._boost_step = 0
-        self._multi_buy_clicked = False
         self._retry_count = 0
-        self._last_roll_time = 0
+        self._roll_time = 0
 
     def run(self, screenshot, view_w, view_h):
         random_boost_enabled = self.app.config.settings.get('random_boost', True)
@@ -41,7 +39,7 @@ class PrepHandler:
             res_buy = self._detect(screenshot, view_w, view_h, 'Buy Cookie Relay', threshold=0.60)
             if res_buy and res_buy.get('found'):
                 self.bot.log_message.emit('ok', 'Prep: tapping Buy Cookie Relay')
-                self._tap('Buy Cookie Relay')
+                self._tap_retry('Buy Cookie Relay')
                 self._relay_step = 2
                 time.sleep(0.3)
                 return
@@ -50,68 +48,64 @@ class PrepHandler:
             res_sel = self._detect(screenshot, view_w, view_h, 'Select Cookie Relay', threshold=0.60)
             if res_sel and res_sel.get('found'):
                 self.bot.log_message.emit('ok', 'Prep: tapping Select Cookie Relay')
-                self._tap('Select Cookie Relay')
+                self._tap_retry('Select Cookie Relay')
                 self._relay_step = 1
                 time.sleep(0.3)
                 return
 
         # ──────────────────────────────────────────────────────
-        # 2. Random Boost & Target Buff flow (ถ้าเปิดใช้งาน)
+        # 2. Random Boost & Target Buff flow
         # ──────────────────────────────────────────────────────
-        if random_boost_enabled and self._boost_step < 3:
-            # ตรวจสอบว่าได้ Target Buff แล้วหรือยัง (SelectFo)
+        if random_boost_enabled and self._boost_step < 4:
+            # ตรวจ SelectFo ก่อน → เจอ target → กด SelectFo → เสร็จ
             res_fo = self._detect(screenshot, view_w, view_h, 'SelectFo')
             if res_fo and res_fo.get('found') and res_fo.get('text'):
                 text = res_fo['text']
                 if self._is_target_buff_matched(text, target):
                     self.bot.log_message.emit('ok', 'Prep: target buff found: "%s"!' % text)
-                    self._tap('SelectFo')
-                    self._boost_step = 3
-                    self._multi_buy_clicked = False
+                    self._tap_retry('SelectFo')
+                    self._boost_step = 4
                     time.sleep(0.4)
                     return
 
-            # ตรวจสอบปุ่ม Multi Buy
-            res_mb = self._detect(screenshot, view_w, view_h, 'Multi Buy', threshold=0.55)
-            if res_mb and res_mb.get('found'):
-                now = time.time()
-                # ถ้ายังไม่ได้กด หรือเคยกดไปแล้วเกิน 1.2 วินาที (กดพลาด / สุ่มจบแล้วยังไม่ใช่เป้าหมาย) ให้กดสุ่มต่อ
-                if not self._multi_buy_clicked or (now - self._last_roll_time >= 1.2):
-                    self.bot.log_message.emit('ok', 'Prep: rolling Multi Buy...')
-                    self._tap('Multi Buy')
-                    self._multi_buy_clicked = True
-                    self._last_roll_time = now
-                    self._boost_step = 2
-                    time.sleep(0.3)
-                return
+            now = time.time()
 
-            # ถ้ายังไม่เห็น Multi Buy ให้ตรวจหา Multi Tab
-            res_tab = self._detect(screenshot, view_w, view_h, 'Multi Tab', threshold=0.60)
-            if res_tab and res_tab.get('found'):
-                self.bot.log_message.emit('ok', 'Prep: tapping Multi Tab')
-                self._tap('Multi Tab')
-                self._boost_step = 2
-                self._multi_buy_clicked = False
-                time.sleep(0.4)
-                return
-
-            # ถ้ายังไม่เห็นทั้ง Multi Buy และ Multi Tab ให้ตรวจหา Random Boost เพื่อเปิดหน้าต่างสุ่ม
-            res_rb = self._detect(screenshot, view_w, view_h, 'Random Boost', threshold=0.60)
-            if res_rb and res_rb.get('found'):
-                self.bot.log_message.emit('ok', 'Prep: tapping Random Boost')
-                self._tap('Random Boost')
+            # ไม่เจอ → Random Boost → Multi Tab → Multi Buy → รอ → ตรวจ SelectFo → เสร็จ
+            if self._boost_step == 0:
+                self._tap_retry('Random Boost')
                 self._boost_step = 1
-                self._multi_buy_clicked = False
-                time.sleep(0.4)
+                self._roll_time = now
                 return
+
+            if self._boost_step == 1 and now - self._roll_time >= 0.5:
+                self._tap_retry('Multi Tab')
+                self._boost_step = 2
+                return
+
+            if self._boost_step == 2 and now - self._roll_time >= 1.0:
+                self._tap_retry('Multi Buy')
+                self._boost_step = 3
+                return
+
+            if self._boost_step == 3 and now - self._roll_time >= 3.0:
+                res_fo2 = self._detect(screenshot, view_w, view_h, 'SelectFo')
+                if res_fo2 and res_fo2.get('found') and res_fo2.get('text'):
+                    text2 = res_fo2['text']
+                    if self._is_target_buff_matched(text2, target):
+                        self.bot.log_message.emit('ok', 'Prep: target buff found: "%s"!' % text2)
+                        self._tap_retry('SelectFo')
+                        self._boost_step = 4
+                        time.sleep(0.4)
+                        return
+
+            return
 
         # ──────────────────────────────────────────────────────
         # 3. Start Game → กดเมื่อพร้อมเล่น (Boost และ Relay เสร็จแล้ว หรือถูกปิด)
         # ──────────────────────────────────────────────────────
         # Ensure start button is pressed reliably
-        # Ensure start button is pressed reliably
         is_relay_ready = (not cookie_relay_enabled) or (self._relay_step >= 2)
-        is_boost_ready = (not random_boost_enabled) or (self._boost_step >= 3)
+        is_boost_ready = (not random_boost_enabled) or (self._boost_step >= 4)
 
         if is_relay_ready and is_boost_ready:
             # Try detecting the Start Game button up to 8 attempts with a low threshold
@@ -119,22 +113,21 @@ class PrepHandler:
                 result = self._detect(screenshot, view_w, view_h, 'Start Game', threshold=0.30)
                 if result and result.get('found'):
                     self.bot.log_message.emit('ok', f'Prep: pressing Start Game (attempt {attempt + 1})')
-                    self._tap_reliable('Start Game')  # double-tap: PostMessage + SendMessage
+                    self._tap('Start Game')
                     # Verify that the bot has moved to gameplay; if not, retry tap up to 2 extra times
                     for verify in range(2):
                         time.sleep(0.4)
                         if self.bot.state.value == 'gameplay':
                             break
-                        self.bot.log_message.emit('warn', f'Prep: Start Game tap did not change stage, retry {verify + 1}')
-                        self._tap_reliable('Start Game')
+                        #self.bot.log_message.emit('warn', f'Prep: Start Game tap did not change stage, retry {verify + 1}')
+                        self._tap('Start Game')
                     self.bot.state = BotState('gameplay')
                     self.bot._force_until = time.time() + 2
                     return
                 # Not found, wait a bit before next attempt
                 time.sleep(0.3)
             # After all attempts, log warning and perform a final forced tap
-            self.bot.log_message.emit('warning', 'Prep: Start Game button not reliably detected, performing forced tap')
-            self._tap_reliable('Start Game')
+            self._tap('Start Game')
             time.sleep(0.5)
             self.bot.state = BotState('gameplay')
             self.bot._force_until = time.time() + 2
@@ -163,21 +156,13 @@ class PrepHandler:
                 return True
         return False
 
-    def _tap_reliable(self, point_name, stage='prep'):
-        """กดปุ่มสำคัญด้วย tap_reliable (PostMessage + SendMessage double-tap)."""
-        cfg = self.app.config
-        coords = cfg.get_coords(stage)
-        for p in coords:
-            if p[0] == point_name:
-                te = self.app.emulator.tap_engine
-                if te and hasattr(te, 'tap_reliable'):
-                    te.tap_reliable(p[1], p[2])
-                else:
-                    self.app.emulator.tap(p[1], p[2])
-                time.sleep(0.3)
+    def _tap_retry(self, point_name, stage='prep', retries=2, delay=0.4):
+        for i in range(retries + 1):
+            if self._tap(point_name, stage):
                 return True
+            if i < retries:
+                time.sleep(delay)
         return False
-
 
     def _check_prep(self, screenshot, view_w, view_h):
         """Check if on prep screen."""

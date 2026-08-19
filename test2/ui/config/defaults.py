@@ -58,5 +58,6 @@ DEFAULT_CONFIG = {
     'coordinates': DEFAULT_COORDINATES,
     'detection': {
         'Play Button': 'ocr',
+        'SelectFo': 'ocr',
     },
 }

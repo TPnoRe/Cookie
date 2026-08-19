@@ -416,6 +416,9 @@ class Dashboard(QFrame):
         self.view.viewport().update()
 
     def _on_start(self):
+        settings_page = self.app.pages.get('settings')
+        if settings_page and hasattr(settings_page, '_on_save'):
+            settings_page._on_save()
         if hasattr(self.app, 'start_bot'):
             farm_mode = self.app.config.settings.get('farm_mode', 'farm_gold')
             self.app.start_bot(farm_mode)

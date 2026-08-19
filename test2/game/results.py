@@ -17,10 +17,10 @@ class ResultsHandler:
 
     def run(self, screenshot, view_w, view_h):
         checks = [
-            ('Template Level up', lambda: self._tap('Level Up Confirm')),
-            ('OK',                lambda: self._tap('OK')),
-            ('Confirm',           lambda: self._tap('Confirm')),
-            ('Open All',          lambda: self._tap('Open All')),
+            ('Template Level up', lambda: self._tap_retry('Level Up Confirm')),
+            ('OK',                lambda: self._tap_retry('OK')),
+            ('Confirm',           lambda: self._tap_retry('Confirm')),
+            ('Open All',          lambda: self._tap_retry('Open All')),
         ]
         for point_name, action in checks:
             result = self._detect(screenshot, view_w, view_h, point_name)
@@ -54,11 +54,14 @@ class ResultsHandler:
         for p in coords:
             if p[0] == point_name:
                 self.app.emulator.tap(p[1], p[2])
-                lc = self.app.emulator.last_click
-                if lc:
-                    self.bot.log_message.emit(
-                        'info', 'Results: tapped %s @ x=%.1f y=%.1f'
-                        % (point_name, lc[0], lc[1]))
                 time.sleep(0.3)
                 return True
+        return False
+
+    def _tap_retry(self, point_name, retries=2, delay=0.4):
+        for i in range(retries + 1):
+            if self._tap(point_name):
+                return True
+            if i < retries:
+                time.sleep(delay)
         return False

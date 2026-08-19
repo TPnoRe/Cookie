@@ -59,7 +59,7 @@ class LobbyHandler:
         # ไม่บังคับ state — ปล่อยให้ bot loop ตรวจสอบ stage ใหม่เอง
         result = self._detect(screenshot, view_w, view_h, 'Play Button')
         if result and result.get('found'):
-            self._tap('Play Button')
+            self._tap_retry('Play Button')
             #self.bot.log_message.emit('info', 'Lobby: pressed Play Button')
 
     def _detect(self, screenshot, view_w, view_h, point_name):
@@ -80,11 +80,16 @@ class LobbyHandler:
         for p in coords:
             if p[0] == point_name:
                 self.app.emulator.tap(p[1], p[2])
-                lc = self.app.emulator.last_click
-                #if lc:
-                    #self.bot.log_message.emit('info', 'Lobby: tapped %s @ x=%.1f y=%.1f' % (point_name, lc[0], lc[1]))
                 time.sleep(0.3)
                 return True
+        return False
+
+    def _tap_retry(self, point_name, retries=2, delay=0.4):
+        for i in range(retries + 1):
+            if self._tap(point_name):
+                return True
+            if i < retries:
+                time.sleep(delay)
         return False
 
     def _tap_nosleep(self, point_name):

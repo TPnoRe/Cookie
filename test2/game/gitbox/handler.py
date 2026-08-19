@@ -22,14 +22,14 @@ class GitboxHandler:
                      'OK', 'Confirm', 'Close']:
             result = self._detect(screenshot, view_w, view_h, name)
             if result and result.get('found'):
-                self._tap(name)
+                self._tap_retry(name)
                 self._last_tap_time = time.time()
                 return
 
         # 2. หา Open Gitbox (กดเข้าหน้า gitbox)
         result = self._detect(screenshot, view_w, view_h, 'Open Gitbox')
         if result and result.get('found'):
-            self._tap('Open Gitbox')
+            self._tap_retry('Open Gitbox')
             self._last_tap_time = time.time()
             return
 
@@ -37,7 +37,7 @@ class GitboxHandler:
         for name in ['Draw', 'Gitbox ', 'Draw again', 'Confirm Relic', 'upgran']:
             result = self._detect(screenshot, view_w, view_h, name)
             if result and result.get('found'):
-                self._tap(name)
+                self._tap_retry(name)
                 self._last_tap_time = time.time()
                 return
 
@@ -58,9 +58,13 @@ class GitboxHandler:
             for p in coords:
                 if p[0] == point_name:
                     self.app.emulator.tap(p[1], p[2])
-                    lc = self.app.emulator.last_click
-                    if lc:
-                        self.bot.log_message.emit(
-                            'info', 'Gitbox: tapped %s @ x=%.1f y=%.1f'
-                            % (point_name, lc[0], lc[1]))
-                    return
+                    return True
+        return False
+
+    def _tap_retry(self, point_name, retries=2, delay=0.4):
+        for i in range(retries + 1):
+            if self._tap(point_name):
+                return True
+            if i < retries:
+                time.sleep(delay)
+        return False
