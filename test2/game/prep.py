@@ -108,18 +108,37 @@ class PrepHandler:
         # ──────────────────────────────────────────────────────
         # 3. Start Game → กดเมื่อพร้อมเล่น (Boost และ Relay เสร็จแล้ว หรือถูกปิด)
         # ──────────────────────────────────────────────────────
+        # Ensure start button is pressed reliably
+        # Ensure start button is pressed reliably
         is_relay_ready = (not cookie_relay_enabled) or (self._relay_step >= 2)
         is_boost_ready = (not random_boost_enabled) or (self._boost_step >= 3)
 
         if is_relay_ready and is_boost_ready:
-            result = self._detect(screenshot, view_w, view_h, 'Start Game', threshold=0.50)
-            if result and result.get('found'):
-                self.bot.log_message.emit('ok', 'Prep: pressing Start Game')
-                self._tap('Start Game')
-                time.sleep(0.5)
-                self.bot.state = BotState('gameplay')
-                self.bot._force_until = time.time() + 2
-                return
+            # Try detecting the Start Game button up to 8 attempts with a low threshold
+            for attempt in range(8):
+                result = self._detect(screenshot, view_w, view_h, 'Start Game', threshold=0.30)
+                if result and result.get('found'):
+                    self.bot.log_message.emit('ok', f'Prep: pressing Start Game (attempt {attempt + 1})')
+                    self._tap('Start Game')
+                    # Verify that the bot has moved to gameplay; if not, retry tap up to 2 extra times
+                    for verify in range(2):
+                        time.sleep(0.4)
+                        if self.bot.state.value == 'gameplay':
+                            break
+                        self.bot.log_message.emit('warn', f'Prep: Start Game tap did not change stage, retry {verify + 1}')
+                        self._tap('Start Game')
+                    self.bot.state = BotState('gameplay')
+                    self.bot._force_until = time.time() + 2
+                    return
+                # Not found, wait a bit before next attempt
+                time.sleep(0.3)
+            # After all attempts, log warning and perform a final forced tap
+            self.bot.log_message.emit('warning', 'Prep: Start Game button not reliably detected, performing forced tap')
+            self._tap('Start Game')
+            time.sleep(0.5)
+            self.bot.state = BotState('gameplay')
+            self.bot._force_until = time.time() + 2
+            return
 
             
     def _detect(self, screenshot, view_w, view_h, point_name, stage='prep', threshold=0.75):
