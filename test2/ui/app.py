@@ -26,6 +26,7 @@ class App:
     def __init__(self, window):
         self.window = window
         self._running = False
+        self._bot_thread = None
         self.debug_log = False
         self._on_resize = None
         self.config = Config()
