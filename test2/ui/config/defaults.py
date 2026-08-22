@@ -12,6 +12,7 @@ DEFAULT_SETTINGS = {
     'fast_start': True,
     'fast_start_delay': '1.0',
     'cookie_relay': True,
+    'relic_check': True,
     'random_boost': True,
     'target_buff': 'Double Coins',
     'buff_list': [

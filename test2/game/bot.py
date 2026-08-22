@@ -62,8 +62,7 @@ class BotThread(QThread):
                     if old == 'results' and stage != 'results':
                         self._runs += 1
                         self.run_completed.emit()
-                        self.log_message.emit(
-                            'ok', 'Results: run #%d completed!' % self._runs)
+                        self.log_message.emit('ok', 'Results: run #%d completed!' % self._runs)
                         prep_h = self._handlers.get('prep')
                         if prep_h:
                             prep_h._relay_step = 0
@@ -71,7 +70,7 @@ class BotThread(QThread):
 
                     self.state = BotState(stage)
                     self.stage_changed.emit(stage)
-                    self.log_message.emit('ok', 'Stage: %s -> %s' % (old, stage))
+                    #self.log_message.emit('ok', 'Stage: %s -> %s' % (old, stage))
 
                     if stage == 'prep' and old in ('results', 'lobby', 'idle'):
                         prep_h = self._handlers.get('prep')
@@ -98,7 +97,7 @@ class BotThread(QThread):
             self.bot_finished.emit()
             return
 
-        self.log_message.emit('ok', 'Gitbox mode: กำลังเปิดกล่อง...')
+        #self.log_message.emit('ok', 'Gitbox mode: กำลังเปิดกล่อง...')
 
         while not self._stop_flag:
             if not self.app.emulator.connected:
@@ -126,7 +125,7 @@ class BotThread(QThread):
                 self.log_message.emit('err', 'Gitbox error: %s' % str(e))
                 time.sleep(1)
 
-        self.log_message.emit('warn', 'Gitbox mode stopped')
+        #self.log_message.emit('warn', 'Gitbox mode stopped')
         self.bot_finished.emit()
 
     def stop(self):

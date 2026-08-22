@@ -16,21 +16,19 @@ class LobbyHandler:
         self.engine = VisionEngine()
 
     def run(self, screenshot, view_w, view_h):
-        # Relic flow: one step per bot loop (ตรวจสอบด้วย screenshot จริงทุกรอบ)
-        relic_checks = [
-            #('Relic Diamond',  lambda: self._tap_nosleep('Relic Diamond')),
-            #('Claim Relic',    lambda: self._tap_nosleep('Claim Relic')),
-            #('Confirm Relic',  lambda: self._tap_nosleep('Confirm Relic')),
-            ('Lobby Ok',       lambda: self._tap_nosleep('Lobby Ok')),
-            ('Close Relic',    lambda: self._tap_nosleep('Close Relic')),
-        ]
-        for point_name, action in relic_checks:
-            result = self._detect(screenshot, view_w, view_h, point_name)
-            if result and result.get('found'):
-                action()
-                #self.bot.log_message.emit('info', 'Lobby: tapped %s' % point_name)
-                time.sleep(0.3)
-                return
+        relic_check_enabled = self.app.config.settings.get('relic_check', True)
+
+        if relic_check_enabled:
+            relic_checks = [
+                ('Lobby Ok',       lambda: self._tap_nosleep('Lobby Ok')),
+                ('Close Relic',    lambda: self._tap_nosleep('Close Relic')),
+            ]
+            for point_name, action in relic_checks:
+                result = self._detect(screenshot, view_w, view_h, point_name)
+                if result and result.get('found'):
+                    action()
+                    time.sleep(0.3)
+                    return
 
         # Dismiss popups ก่อน (OK / Confirm / Close)
         popup_checks = [

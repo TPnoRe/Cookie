@@ -172,6 +172,7 @@ class Settings(QFrame):
         sw_rows = [
             ('fast_start', 'Fast Start', True),
             ('cookie_relay', 'Cookie Relay', True),
+            ('relic_check', 'Relic Check', True),
         ]
         for key, title, default in sw_rows:
             sw = ToggleSwitch(card, checked=default)
@@ -264,6 +265,7 @@ class Settings(QFrame):
             'fast_start_delay': self._num_fields['fast_start_delay'].text(),
             'fast_start': self._switches['fast_start'].isChecked(),
             'cookie_relay': self._switches['cookie_relay'].isChecked(),
+            'relic_check': self._switches['relic_check'].isChecked(),
             'random_boost': self._switches['random_boost'].isChecked(),
             'target_buff': self.buff_menu.current_text(),
         }
@@ -289,6 +291,7 @@ class Settings(QFrame):
         self._num_fields['fast_start_delay'].setText('1.0')
         self._switches['fast_start'].setChecked(True)
         self._switches['cookie_relay'].setChecked(True)
+        self._switches['relic_check'].setChecked(True)
         self._switches['random_boost'].setChecked(True)
         self.buff_menu.set_current('Double Coins')
         self.save_lbl.setText('')

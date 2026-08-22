@@ -38,7 +38,7 @@ class PrepHandler:
             # ถ้าเห็นปุ่ม Buy ให้กดซื้อทันที
             res_buy = self._detect(screenshot, view_w, view_h, 'Buy Cookie Relay', threshold=0.60)
             if res_buy and res_buy.get('found'):
-                self.bot.log_message.emit('ok', 'Prep: tapping Buy Cookie Relay')
+                #self.bot.log_message.emit('ok', 'Prep: tapping Buy Cookie Relay')
                 self._tap_retry('Buy Cookie Relay')
                 self._relay_step = 2
                 time.sleep(0.3)
@@ -47,7 +47,7 @@ class PrepHandler:
             # ถ้ายังไม่เห็น Buy ให้กด Select Cookie Relay เพื่อเปิด
             res_sel = self._detect(screenshot, view_w, view_h, 'Select Cookie Relay', threshold=0.60)
             if res_sel and res_sel.get('found'):
-                self.bot.log_message.emit('ok', 'Prep: tapping Select Cookie Relay')
+                #self.bot.log_message.emit('ok', 'Prep: tapping Select Cookie Relay')
                 self._tap_retry('Select Cookie Relay')
                 self._relay_step = 1
                 time.sleep(0.3)
@@ -62,7 +62,7 @@ class PrepHandler:
             if res_fo and res_fo.get('found') and res_fo.get('text'):
                 text = res_fo['text']
                 if self._is_target_buff_matched(text, target):
-                    self.bot.log_message.emit('ok', 'Prep: target buff found: "%s"!' % text)
+                    #self.bot.log_message.emit('ok', 'Prep: target buff found: "%s"!' % text)
                     self._tap_retry('SelectFo')
                     self._boost_step = 4
                     time.sleep(0.4)
@@ -92,7 +92,7 @@ class PrepHandler:
                 if res_fo2 and res_fo2.get('found') and res_fo2.get('text'):
                     text2 = res_fo2['text']
                     if self._is_target_buff_matched(text2, target):
-                        self.bot.log_message.emit('ok', 'Prep: target buff found: "%s"!' % text2)
+                        #self.bot.log_message.emit('ok', 'Prep: target buff found: "%s"!' % text2)
                         self._tap_retry('SelectFo')
                         self._boost_step = 4
                         time.sleep(0.4)
@@ -112,7 +112,7 @@ class PrepHandler:
             for attempt in range(8):
                 result = self._detect(screenshot, view_w, view_h, 'Start Game', threshold=0.30)
                 if result and result.get('found'):
-                    self.bot.log_message.emit('ok', f'Prep: pressing Start Game (attempt {attempt + 1})')
+                    #self.bot.log_message.emit('ok', f'Prep: pressing Start Game (attempt {attempt + 1})')
                     self._tap('Start Game')
                     # Verify that the bot has moved to gameplay; if not, retry tap up to 2 extra times
                     for verify in range(2):
