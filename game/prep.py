@@ -105,6 +105,22 @@ class PrepHandler:
 
 
         if rb_enabled and self._boost_step < 5:
+            # ── เช็ค SelectFo ก่อน ถ้า target buff ตรง ข้าม boost ไปกด Start Game เลย ──
+            if self._boost_step == 0:
+                target_buff = self.app.config.settings.get('target_buff', '')
+                if target_buff:
+                    res_fo = self._detect(screenshot, view_w, view_h, 'SelectFo', threshold=0.60)
+                    if res_fo and res_fo.get('found'):
+                        fo_text = res_fo.get('text', '') or ''
+                        if self._is_target_buff_matched(fo_text, target_buff):
+                            res_start = self._detect(screenshot, view_w, view_h, 'Start Game', threshold=0.60)
+                            if res_start and res_start.get('found'):
+                                self._tap_retry('Start Game')
+                                self._boost_step = 5
+                                time.sleep(0.3)
+                                self.bot.log_message.emit('ok', 'Target buff ตรง — ข้าม Random Boost → Start Game')
+                                return
+
             if self._boost_step == 0:
                 if self._tap('Random Boost'):
                     time.sleep(0.3)
