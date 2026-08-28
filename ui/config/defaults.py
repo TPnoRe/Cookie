@@ -70,5 +70,6 @@ DEFAULT_CONFIG = {
     'detection': {
         'Play Button': 'ocr',
         'SelectFo': 'ocr',
+        'Relic Diamond': 'ocr',
     },
 }

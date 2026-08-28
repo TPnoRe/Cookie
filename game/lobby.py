@@ -48,6 +48,17 @@ class LobbyHandler:
                     time.sleep(0.3)
                     return
 
+        # 2.1 Relic Diamond "Got!" check
+        relic_check_enabled = self.app.config.settings.get('relic_check', True)
+        if relic_check_enabled:
+            res_rd = self._detect(screenshot, view_w, view_h, 'Relic Diamond')
+            if res_rd and res_rd.get('found'):
+                rd_text = res_rd.get('text', '') or ''
+                if 'got' in rd_text.lower():
+                    self.app.emulator.tap(41.3, 16.1)
+                    time.sleep(0.3)
+                    return
+
         # 3. Play Button
         result = self._detect(screenshot, view_w, view_h, 'Play Button')
         if result and result.get('found'):
