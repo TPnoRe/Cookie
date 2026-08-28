@@ -129,7 +129,6 @@ class App:
             return
         self._detecting_emulator = True
         self._health_check_active = False
-        self.dashboard_push('info', 'Searching for emulator (Auto-Detect)...')
         self._detect_emulator_step()
 
     def _stop_emulator_detection(self):
@@ -156,6 +155,7 @@ class App:
             self.pages['dashboard'].sync_emulator_ui()
             self.update_sys_status()
             self.show_toast('ok', '%s connected' % name)
+            self.dashboard_push('ok', '%s connected (%dx%d)' % (name, size[0], size[1]))
             # ตรวจพบและเชื่อมต่อเรียบร้อย -> หยุดระบบ Detection ทันที
             self._stop_emulator_detection()
             # เริ่มระบบ Health Check คอยตรวจจับกรณี Emulator ปิด
@@ -202,6 +202,7 @@ class App:
             name = self.emulator.emulator_name
             size = self.emulator.get_size() or (0, 0)
             self.show_toast('ok', '%s connected' % name)
+            self.dashboard_push('ok', '%s connected (%dx%d)' % (name, size[0], size[1]))
             self._stop_emulator_detection()
             self._start_health_check()
         else:
