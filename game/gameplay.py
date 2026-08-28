@@ -50,13 +50,9 @@ class GameplayHandler:
             now = time.time()
             if now - self._last_jump_time >= jump_interval:
                 if self._detect_pit(screenshot, view_w, view_h):
-                    self._double_jump()
+                    self._double_slide()
                 else:
-                    action = random.choice(['jump', 'double_jump'])
-                    if action == 'jump':
-                        self._single_jump()
-                    else:
-                        self._double_jump()
+                    self._double_slide()
                 self._last_jump_time = now
 
     def _detect(self, screenshot, view_w, view_h, point_name):
@@ -120,7 +116,18 @@ class GameplayHandler:
 
     def _single_jump(self):
         self._tap('Jump')
-
+        
+    def _single_slide(self):
+        self._tap('Slide')
+        
+    def _double_slide(self):
+        cfg = self.app.config
+        coords = cfg.get_coords('gameplay')
+        for p in coords:
+            if p[0] == 'Slide':
+                self.app.emulator.tap(p[1], p[2], hold_ms=2000)
+                return
+            
     def _double_jump(self):
         self._tap('Jump')
         time.sleep(0.1)

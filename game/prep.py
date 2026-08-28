@@ -42,6 +42,18 @@ class PrepHandler:
         fast_start_enabled = self.app.config.settings.get('fast_start', True)        
         cookie_relay_enabled = self.app.config.settings.get('cookie_relay', True)
         rb_enabled = self.app.config.settings.get('random_boost', True)
+
+        # ── ถ้าปิดทั้ง 3 ตัว → กด Start Game เลย ──
+        if not fast_start_enabled and not cookie_relay_enabled and not rb_enabled:
+            if self._fast_step == 0 and self._relay_step == 0 and self._boost_step == 0:
+                res = self._detect(screenshot, view_w, view_h, 'Start Game', threshold=0.60)
+                if res and res.get('found'):
+                    self._tap_retry('Start Game')
+                    self._boost_step = 5
+                    time.sleep(0.3)
+                    self.bot.log_message.emit('ok', 'Fast Start/Relay/Boost ปิดหมด → Start Game เลย')
+                    return
+
         # ──────────────────────────────────────────────────────
         # 1. Fast Start flow (อันดับ 1)
         # ──────────────────────────────────────────────────────
