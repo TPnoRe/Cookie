@@ -41,8 +41,8 @@ class TapEngine:
         return None
 
     # ── Tap by % ───────────────────────────────────────
-    def tap(self, x_pct, y_pct, hold_ms=None):
-        """แตะที่พิกัด % ของ Viewport."""
+    def tap(self, x_pct, y_pct, hold_ms=None, box_w_pct=None, box_h_pct=None):
+        """Tap a point, optionally at a random position inside its ROI box."""
         if not self.hwnd:
             return False
         size = self._get_size()
@@ -51,14 +51,27 @@ class TapEngine:
         width, height = size
 
         s = self._settings()
-        jitter_pct = float(s.get('click_jitter_pct', 0.2))
-        dx = random.uniform(-jitter_pct, jitter_pct)
-        dy = random.uniform(-jitter_pct, jitter_pct)
-        cx, cy = pct_to_px(width, height, x_pct + dx, y_pct + dy)
+        if box_w_pct and box_h_pct and float(box_w_pct) > 0 and float(box_h_pct) > 0:
+            # Coordinates define a center + width/height ROI. Apply the normal
+            # jitter around the center, then clamp it to this rectangle.
+            left = max(0.0, float(x_pct) - float(box_w_pct) / 2.0)
+            right = min(100.0, float(x_pct) + float(box_w_pct) / 2.0)
+            top = max(0.0, float(y_pct) - float(box_h_pct) / 2.0)
+            bottom = min(100.0, float(y_pct) + float(box_h_pct) / 2.0)
+            jitter_pct = max(0.0, float(s.get('click_jitter_pct', 0.2)))
+            cx, cy = pct_to_px(
+                width, height,
+                max(left, min(right, float(x_pct) + random.uniform(-jitter_pct, jitter_pct))),
+                max(top, min(bottom, float(y_pct) + random.uniform(-jitter_pct, jitter_pct))))
+        else:
+            jitter_pct = float(s.get('click_jitter_pct', 0.2))
+            dx = random.uniform(-jitter_pct, jitter_pct)
+            dy = random.uniform(-jitter_pct, jitter_pct)
+            cx, cy = pct_to_px(width, height, x_pct + dx, y_pct + dy)
 
-        jitter_px = float(s.get('click_jitter_px', 0.5))
-        cx = max(0, min(width - 1, int(cx + random.uniform(-jitter_px, jitter_px))))
-        cy = max(0, min(height - 1, int(cy + random.uniform(-jitter_px, jitter_px))))
+            jitter_px = float(s.get('click_jitter_px', 0.5))
+            cx = max(0, min(width - 1, int(cx + random.uniform(-jitter_px, jitter_px))))
+            cy = max(0, min(height - 1, int(cy + random.uniform(-jitter_px, jitter_px))))
 
         delay_min = float(s.get('click_delay_min', 0.05))
         delay_max = float(s.get('click_delay_max', 0.15))
@@ -151,7 +164,7 @@ class TapEngine:
         win32gui.PostMessage(render_hwnd, win32con.WM_LBUTTONUP, 0, lparam)
         
     # ── Tap Fast (delay สั้น) ──
-    def tap_fast(self, x_pct, y_pct):
+    def tap_fast(self, x_pct, y_pct, box_w_pct=None, box_h_pct=None):
         """กดเร็ว — delay 0.05-0.10s, hold 80ms."""
         if not self.hwnd:
             return False
@@ -159,7 +172,18 @@ class TapEngine:
         if not size:
             return False
         width, height = size
-        cx, cy = pct_to_px(width, height, x_pct, y_pct)
+        if box_w_pct and box_h_pct and float(box_w_pct) > 0 and float(box_h_pct) > 0:
+            left = max(0.0, float(x_pct) - float(box_w_pct) / 2.0)
+            right = min(100.0, float(x_pct) + float(box_w_pct) / 2.0)
+            top = max(0.0, float(y_pct) - float(box_h_pct) / 2.0)
+            bottom = min(100.0, float(y_pct) + float(box_h_pct) / 2.0)
+            jitter_pct = max(0.0, float(self._settings().get('click_jitter_pct', 0.2)))
+            cx, cy = pct_to_px(
+                width, height,
+                max(left, min(right, float(x_pct) + random.uniform(-jitter_pct, jitter_pct))),
+                max(top, min(bottom, float(y_pct) + random.uniform(-jitter_pct, jitter_pct))))
+        else:
+            cx, cy = pct_to_px(width, height, x_pct, y_pct)
         try:
             time.sleep(random.uniform(0.05, 0.10))
             lparam = ((int(cy) & 0xFFFF) << 16) | (int(cx) & 0xFFFF)

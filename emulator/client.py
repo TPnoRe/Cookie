@@ -79,70 +79,86 @@ class EmulatorClient:
     # ── Capture ─────────────────────────────────────────
 
     def screenshot(self):
-        if not self.connected or not self.hwnd:
-            return None
-        hwnd = self.hwnd
-        size = self.get_size()
-        self.connected = self.viewport.connected
-        if not size:
-            return None
-        width, height = size
+        # The bot worker and preview UI can request a frame concurrently.
+        # Serialize capture and always release GDI handles on every path.
+        with self._lock:
+            if not self.connected or not self.hwnd:
+                return None
+            hwnd = self.hwnd
+            size = self.get_size()
+            self.connected = self.viewport.connected
+            if not size:
+                return None
+            width, height = size
 
-        for flag in (3, 0):
-            try:
-                hwndDC = win32gui.GetWindowDC(hwnd)
-                mfcDC = win32ui.CreateDCFromHandle(hwndDC)
-                saveDC = mfcDC.CreateCompatibleDC()
-                bitmap = win32ui.CreateBitmap()
-                bitmap.CreateCompatibleBitmap(mfcDC, width, height)
-                saveDC.SelectObject(bitmap)
-                result = windll.user32.PrintWindow(
-                    hwnd, saveDC.GetSafeHdc(), flag)
-                bmpinfo = bitmap.GetInfo()
-                bmpstr = bitmap.GetBitmapBits(True)
-                img = Image.frombuffer(
-                    'RGB', (bmpinfo['bmWidth'], bmpinfo['bmHeight']),
-                    bmpstr, 'raw', 'BGRX', 0, 1).copy()
-                win32gui.DeleteObject(bitmap.GetHandle())
-                saveDC.DeleteDC()
-                mfcDC.DeleteDC()
-                win32gui.ReleaseDC(hwnd, hwndDC)
-                if result == 1 and img and img.width > 0 and img.height > 0:
+            for flag in (3, 0):
+                img = self._capture_gdi(hwnd, width, height, print_flag=flag)
+                if img:
                     return img
-            except Exception:
-                pass
 
+            img = self._capture_gdi(hwnd, width, height, print_flag=None)
+            if img:
+                return img
+
+            try:
+                sx, sy = self.viewport.client_to_screen(0, 0)
+                img = ImageGrab.grab(bbox=(sx, sy, sx + width, sy + height))
+                return img.copy() if img else None
+            except Exception:
+                return None
+
+    @staticmethod
+    def _capture_gdi(hwnd, width, height, print_flag):
+        """Capture one frame and release every GDI resource, even on failure."""
+        hwnd_dc = mfc_dc = save_dc = bitmap = old_bitmap = None
         try:
-            hwndDC = win32gui.GetWindowDC(hwnd)
-            mfcDC = win32ui.CreateDCFromHandle(hwndDC)
-            saveDC = mfcDC.CreateCompatibleDC()
+            hwnd_dc = win32gui.GetWindowDC(hwnd)
+            mfc_dc = win32ui.CreateDCFromHandle(hwnd_dc)
+            save_dc = mfc_dc.CreateCompatibleDC()
             bitmap = win32ui.CreateBitmap()
-            bitmap.CreateCompatibleBitmap(mfcDC, width, height)
-            saveDC.SelectObject(bitmap)
-            saveDC.BitBlt((0, 0), (width, height), mfcDC, (0, 0),
-                          win32con.SRCCOPY)
+            bitmap.CreateCompatibleBitmap(mfc_dc, width, height)
+            old_bitmap = save_dc.SelectObject(bitmap)
+
+            if print_flag is None:
+                save_dc.BitBlt((0, 0), (width, height), mfc_dc, (0, 0),
+                               win32con.SRCCOPY)
+            elif windll.user32.PrintWindow(hwnd, save_dc.GetSafeHdc(), print_flag) != 1:
+                return None
+
             bmpinfo = bitmap.GetInfo()
             bmpstr = bitmap.GetBitmapBits(True)
             img = Image.frombuffer(
                 'RGB', (bmpinfo['bmWidth'], bmpinfo['bmHeight']),
                 bmpstr, 'raw', 'BGRX', 0, 1).copy()
-            win32gui.DeleteObject(bitmap.GetHandle())
-            saveDC.DeleteDC()
-            mfcDC.DeleteDC()
-            win32gui.ReleaseDC(hwnd, hwndDC)
-            if img and img.width > 0 and img.height > 0:
-                return img
+            return img if img.width > 0 and img.height > 0 else None
         except Exception:
-            pass
-
-        try:
-            sx, sy = self.viewport.client_to_screen(0, 0)
-            img = ImageGrab.grab(bbox=(sx, sy, sx + width, sy + height))
-            if img:
-                return img.copy()
-        except Exception:
-            pass
-        return None
+            return None
+        finally:
+            if save_dc is not None and old_bitmap is not None:
+                try:
+                    save_dc.SelectObject(old_bitmap)
+                except Exception:
+                    pass
+            if bitmap is not None:
+                try:
+                    win32gui.DeleteObject(bitmap.GetHandle())
+                except Exception:
+                    pass
+            if save_dc is not None:
+                try:
+                    save_dc.DeleteDC()
+                except Exception:
+                    pass
+            if mfc_dc is not None:
+                try:
+                    mfc_dc.DeleteDC()
+                except Exception:
+                    pass
+            if hwnd_dc is not None:
+                try:
+                    win32gui.ReleaseDC(hwnd, hwnd_dc)
+                except Exception:
+                    pass
 
     def screenshot_base64(self):
         img = self.screenshot()
@@ -153,14 +169,15 @@ class EmulatorClient:
         return base64.b64encode(buf.getvalue()).decode('ascii')
 
     # ── Click ───────────────────────────────────────────
-    def tap(self, x_pct, y_pct, hold_ms=None):
-        """แตะที่พิกัด % ของ Viewport (สเกลตามขนาดจอปัจจุบัน)."""
+    def tap(self, x_pct, y_pct, hold_ms=None, box_w_pct=None, box_h_pct=None):
+        """Tap a point, optionally randomised within its coordinate box."""
         if not self.connected or not self.hwnd:
             return False
         size = self.get_size()
         if not size:
             return False
-        ok = self.tap_engine.tap(x_pct, y_pct, hold_ms)
+        ok = self.tap_engine.tap(
+            x_pct, y_pct, hold_ms, box_w_pct=box_w_pct, box_h_pct=box_h_pct)
         if ok:
             width, height = size
             ax = self.tap_engine.last_tap_x
@@ -195,14 +212,15 @@ class EmulatorClient:
                 time.time(),)
         return ok
 
-    def tap_fast(self, x_pct, y_pct):
-        """กดเร็ว — ไม่มี jitter, hold สั้น."""
+    def tap_fast(self, x_pct, y_pct, box_w_pct=None, box_h_pct=None):
+        """Fast tap, optionally randomised within its coordinate box."""
         if not self.connected or not self.hwnd:
             return False
         size = self.get_size()
         if not size:
             return False
-        ok = self.tap_engine.tap_fast(x_pct, y_pct)
+        ok = self.tap_engine.tap_fast(
+            x_pct, y_pct, box_w_pct=box_w_pct, box_h_pct=box_h_pct)
         if ok:
             width, height = size
             ax = self.tap_engine.last_tap_x

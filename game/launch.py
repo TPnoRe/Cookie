@@ -30,7 +30,9 @@ class LaunchHandler:
         if not (res_congrats and res_congrats.get('found')):
             res_congrats = self._detect_roi_or_ocr(screenshot, view_w, view_h, 'Daliy Confirm')
         if res_congrats and res_congrats.get('found'):
-            self._tap_result(res_congrats, 'Daily Confirm')
+            # The Congratulations dialog shares the Confirm Relic button
+            # position (50%, 80%), not the daily check-in button position.
+            self._tap_result(res_congrats, 'Confirm Relic')
             time.sleep(0.5)
             return
 
@@ -59,6 +61,17 @@ class LaunchHandler:
                 self._tap_result(res_popup, p_name)
                 time.sleep(0.4)
                 return
+
+        # ── Relic Diamond: ถ้า OCR อ่านว่า "Got!" ให้กดเลย ──
+        relic_check_enabled = self.app.config.settings.get('relic_check', True)
+        if relic_check_enabled:
+            res_rd = self._detect_roi_or_ocr(screenshot, view_w, view_h, 'Relic Diamond')
+            if res_rd and res_rd.get('found'):
+                rd_text = (res_rd.get('text', '') or '').lower()
+                if 'got' in rd_text:
+                    self._tap_result(res_rd, 'Relic Diamond')
+                    time.sleep(0.4)
+                    return
 
         # ── 2. ตรวจจับหน้าจอ Home Screen และแตะเปิดเกม ─────────────────
         res_app = self.engine.find_template(screenshot, 'App_Icon', stage='launch', threshold=0.75)
@@ -131,18 +144,23 @@ class LaunchHandler:
         return None
 
     def _tap_result(self, result, point_name):
+        cfg = self.app.config
+        coords = cfg.get_coords('lobby')
+        point = next((p for p in coords if p[0] == point_name), None)
         pct_x = result.get('pct_x')
         pct_y = result.get('pct_y')
         if pct_x is not None and pct_y is not None:
-            self.app.emulator.tap(pct_x, pct_y)
+            if point:
+                self.app.emulator.tap(
+                    point[1], point[2], box_w_pct=point[3], box_h_pct=point[4])
+            else:
+                self.app.emulator.tap(pct_x, pct_y)
             return True
 
-        cfg = self.app.config
-        coords = cfg.get_coords('lobby')
-        for p in coords:
-            if p[0] == point_name:
-                self.app.emulator.tap(p[1], p[2])
-                return True
+        if point:
+            self.app.emulator.tap(
+                point[1], point[2], box_w_pct=point[3], box_h_pct=point[4])
+            return True
 
         click_x = result.get('click_x')
         click_y = result.get('click_y')

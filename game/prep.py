@@ -60,16 +60,11 @@ class PrepHandler:
         if fast_start_enabled and self._fast_step < 2:
             if self._fast_step == 0:
                 if self._tap('Select Fast Start'):
-                    time.sleep(0.3)
-                    res_rel = self._detect(
-                        screenshot, view_w, view_h,
-                        'Buy Fast Start', threshold=0.60
-                    )
-                    if res_rel and res_rel.get('found'):
-                        self._fast_step = 1
-                        return
-                    else:
-                        self.bot.log_message.emit('warn', 'Fast Start: step0 — Buy ไม่เจอ → tap พลาด อยู่ step0 ต่อ')
+                    # The next loop receives a fresh screenshot before it
+                    # checks Buy Fast Start; this frame predates the tap.
+                    self._fast_step = 1
+                    self._fast_select_time = time.monotonic()
+                    return
                 else:
                     self.bot.log_message.emit('err', 'Fast Start: step0 — ไม่มีพิกัด Select Fast Start')
                 return
@@ -83,24 +78,29 @@ class PrepHandler:
                     time.sleep(0.3)
                     self.bot.log_message.emit('ok', 'Fast Start: สำเร็จ')
                     return
+                if time.monotonic() - self._fast_select_time >= _SELECT_TIMEOUT:
+                    self._fast_step = 0
+                    self.bot.log_message.emit('warn', 'Fast Start: Buy ไม่ปรากฏ → ลองใหม่')
+                return
 
-
+            if self._fast_step == 2 and self._relay_step == 0 and self._boost_step == 0:
+                res = self._detect(screenshot, view_w, view_h, 'Start Game', threshold=0.60)
+                if res and res.get('found'):
+                    self._tap_retry('Start Game')
+                    self._boost_step = 3
+                    time.sleep(0.3)
+                    return
+                    
         # ──────────────────────────────────────────────────────
         # 2. Cookie Relay flow (อันดับ 2)
         # ──────────────────────────────────────────────────────
         if cookie_relay_enabled and self._relay_step < 2:
             if self._relay_step == 0:
                 if self._tap('Select Cookie Relay'):
-                    time.sleep(0.3)
-                    res_buy = self._detect(
-                        screenshot, view_w, view_h,
-                        'Buy Cookie Relay', threshold=0.60
-                    )
-                    if res_buy and res_buy.get('found'):
-                        self._relay_step = 1
-                        return
-                    else:
-                        self.bot.log_message.emit('warn', 'Cookie Relay: step0 — Buy ไม่เจอ → tap พลาด อยู่ step0 ต่อ')
+                    # Wait for a new loop/screenshot before checking Buy.
+                    self._relay_step = 1
+                    self._relay_select_time = time.monotonic()
+                    return
                 else:
                     self.bot.log_message.emit('err', 'Cookie Relay: step0 — ไม่มีพิกัด Select Cookie Relay')
                 return
@@ -114,9 +114,27 @@ class PrepHandler:
                     time.sleep(0.3)
                     self.bot.log_message.emit('ok', 'Cookie Relay: สำเร็จ')
                     return
+                if time.monotonic() - self._relay_select_time >= _SELECT_TIMEOUT:
+                    self._relay_step = 0
+                    self.bot.log_message.emit('warn', 'Cookie Relay: Buy ไม่ปรากฏ → ลองใหม่')
+                return
 
+            if self._fast_step == 0 and self._relay_step == 2 and self._boost_step == 0:
+                res = self._detect(screenshot, view_w, view_h, 'Start Game', threshold=0.60)
+                if res and res.get('found'):
+                    self._tap_retry('Start Game')
+                    self._relay_step = 3
+                    time.sleep(0.3)
+                    return
+                    
 
         if rb_enabled and self._boost_step < 5:
+            if (self._boost_step and self._roll_time and
+                    time.monotonic() - self._roll_time >= _BOOST_TIMEOUT):
+                self._boost_step = 0
+                self._roll_time = 0
+                self.bot.log_message.emit('warn', 'Random Boost: flow timeout → เริ่มใหม่')
+
             # ── เช็ค SelectFo ก่อน ถ้า target buff ตรง ข้าม boost ไปกด Start Game เลย ──
             if self._boost_step == 0:
                 target_buff = self.app.config.settings.get('target_buff', '')
@@ -135,11 +153,9 @@ class PrepHandler:
 
             if self._boost_step == 0:
                 if self._tap('Random Boost'):
-                    time.sleep(0.3)
-                    res = self._detect(screenshot, view_w, view_h, 'Multi Tab', threshold=0.60)
-                    if res and res.get('found'):
-                        self._boost_step = 1
-                        return
+                    self._boost_step = 1
+                    self._roll_time = time.monotonic()
+                    return
                 else:
                     self.bot.log_message.emit('err', 'Random Boost: ไม่มีพิกัด Random Boost')
                 return
@@ -149,11 +165,9 @@ class PrepHandler:
                 res = self._detect(screenshot, view_w, view_h, 'Multi Tab', threshold=0.60)
                 if res and res.get('found'):
                     self._tap_retry('Multi Tab')
-                    time.sleep(0.3)
-                    res2 = self._detect(screenshot, view_w, view_h, 'Multi Buy', threshold=0.60)
-                    if res2 and res2.get('found'):
-                        self._boost_step = 2
-                        return
+                    self._boost_step = 2
+                    self._roll_time = time.monotonic()
+                    return
                 return
 
 
@@ -161,11 +175,9 @@ class PrepHandler:
                 res = self._detect(screenshot, view_w, view_h, 'Multi Buy', threshold=0.60)
                 if res and res.get('found'):
                     self._tap_retry('Multi Buy')
-                    time.sleep(0.3)
-                    res2 = self._detect(screenshot, view_w, view_h, 'SelectFo', threshold=0.60)
-                    if res2 and res2.get('found'):
-                        self._boost_step = 3
-                        return
+                    self._boost_step = 3
+                    self._roll_time = time.monotonic()
+                    return
                 return
 
 
@@ -173,11 +185,9 @@ class PrepHandler:
                 res = self._detect(screenshot, view_w, view_h, 'SelectFo', threshold=0.60)
                 if res and res.get('found'):
                     self._tap_retry('SelectFo')
-                    time.sleep(0.3)
-                    res2 = self._detect(screenshot, view_w, view_h, 'Start Game', threshold=0.60)
-                    if res2 and res2.get('found'):
-                        self._boost_step = 4
-                        return
+                    self._boost_step = 4
+                    self._roll_time = time.monotonic()
+                    return
                 return
 
 
@@ -209,18 +219,15 @@ class PrepHandler:
         coords = cfg.get_coords(stage)
         for p in coords:
             if p[0] == point_name:
-                self.app.emulator.tap(p[1], p[2])
+                self.app.emulator.tap(
+                    p[1], p[2], box_w_pct=p[3], box_h_pct=p[4])
                 time.sleep(0.3)
                 return True
         return False
 
     def _tap_retry(self, point_name, stage='prep', retries=2, delay=0.4):
-        for i in range(retries + 1):
-            if self._tap(point_name, stage):
-                return True
-            if i < retries:
-                time.sleep(delay)
-        return False
+        """Tap once; the next fresh screenshot decides whether to advance."""
+        return self._tap(point_name, stage)
 
     def _has_coord(self, point_name, stage='prep'):
         cfg = self.app.config

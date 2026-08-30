@@ -1,12 +1,20 @@
 """game/bot.py -- Bot worker thread."""
 import time
 import logging
+import traceback
+from pathlib import Path
 from PyQt6.QtCore import QThread, pyqtSignal
 
 from game.state import BotState
 from vision.engine import VisionEngine
 
 log = logging.getLogger(__name__)
+
+
+# A missing template for one frame is normal. This only recovers from an
+# unrecognised screen that persists for several seconds.
+_STATE_RECOVERY_TIMEOUT = 8.0
+_MAX_CONSECUTIVE_RECOVERIES = 3
 
 
 class BotThread(QThread):
@@ -27,7 +35,8 @@ class BotThread(QThread):
         self._handlers = {}
         self._runs = 0
         self._engine = VisionEngine()
-        self._force_until = 0
+        self._state_unseen_since = None
+        self._recovery_count = 0
 
     def run(self):
         #self.log_message.emit('ok', 'Bot started (%s)' % self.farm_mode)
@@ -74,6 +83,11 @@ class BotThread(QThread):
                     self.stage_changed.emit(stage)
                     #self.log_message.emit('ok', 'Stage: %s -> %s' % (old, stage))
 
+                    if stage == 'gameplay' and old != 'gameplay':
+                        gameplay_h = self._handlers.get('gameplay')
+                        if gameplay_h:
+                            gameplay_h.reset()
+
                     if stage == 'prep' and old in ('results', 'lobby', 'idle'):
                         prep_h = self._handlers.get('prep')
                         if prep_h:
@@ -87,8 +101,8 @@ class BotThread(QThread):
 
                 time.sleep(self._loop_interval)
 
-            except Exception as e:
-                self.log_message.emit('err', 'Bot error: %s' % str(e))
+            except Exception:
+                self.log_message.emit('err', traceback.format_exc())
                 time.sleep(1)
 
         self.log_message.emit('warn', 'Bot stopped')
@@ -125,8 +139,8 @@ class BotThread(QThread):
 
                 time.sleep(self._loop_interval)
 
-            except Exception as e:
-                self.log_message.emit('err', 'Gitbox error: %s' % str(e))
+            except Exception:
+                self.log_message.emit('err', traceback.format_exc())
                 time.sleep(1)
 
         #self.log_message.emit('warn', 'Gitbox mode stopped')
@@ -143,7 +157,8 @@ class BotThread(QThread):
 
     def reset(self):
         self.state = BotState.IDLE
-        self._force_until = 0
+        self._state_unseen_since = None
+        self._recovery_count = 0
         self._runs = 0
         self._handlers.clear()
         self._loop_interval = 0.3
@@ -166,57 +181,53 @@ class BotThread(QThread):
         }
 
     def _detect_stage(self, screenshot, view_w, view_h):
-        if time.time() < self._force_until:
-            return self.state.value
-
         current = self.state.value
-
-        if current == 'gameplay':
-            if self._handlers['gameplay']._check_gameplay(screenshot, view_w, view_h):
-                return 'gameplay'
-            if self._handlers['results']._check_results(screenshot, view_w, view_h):
-                return 'results'
-            if self._handlers['lobby']._check_lobby(screenshot, view_w, view_h):
-                return 'lobby'
-            # ระหว่าง gameplay ถ้า momentary frame ตรวจไม่เจอปุ่ม ให้คงสถานะ gameplay ไว้
-            return 'gameplay'
-
-        if current == 'results':
-            if self._handlers['results']._check_results(screenshot, view_w, view_h):
-                return 'results'
-            if self._handlers['lobby']._check_lobby(screenshot, view_w, view_h):
-                return 'lobby'
-            if self._handlers['prep']._check_prep(screenshot, view_w, view_h):
-                return 'prep'
-            if self._handlers['gameplay']._check_gameplay(screenshot, view_w, view_h):
-                return 'gameplay'
+        # Verify the presumed state first. If it no longer matches, scan every
+        # known state instead of indefinitely retaining an outdated state.
+        current_handler = self._handlers.get(current)
+        current_check = getattr(current_handler, '_check_%s' % current, None)
+        if current_check and current_check(screenshot, view_w, view_h):
+            self._state_unseen_since = None
+            self._recovery_count = 0
             return current
 
-        if current == 'prep':
-            if self._handlers['prep']._check_prep(screenshot, view_w, view_h):
-                return 'prep'
-            if self._handlers['gameplay']._check_gameplay(screenshot, view_w, view_h):
-                return 'gameplay'
-            if self._handlers['lobby']._check_lobby(screenshot, view_w, view_h):
-                return 'lobby'
-            if self._handlers['results']._check_results(screenshot, view_w, view_h):
-                return 'results'
-            return current
+        detected = self._scan_all_stages(screenshot, view_w, view_h)
+        if detected:
+            self._state_unseen_since = None
+            self._recovery_count = 0
+            return detected
 
-        if current == 'launch':
-            if self._handlers['lobby']._check_lobby(screenshot, view_w, view_h):
-                return 'lobby'
-            if self._handlers['prep']._check_prep(screenshot, view_w, view_h):
-                return 'prep'
-            if self._handlers['gameplay']._check_gameplay(screenshot, view_w, view_h):
-                return 'gameplay'
-            if self._handlers['results']._check_results(screenshot, view_w, view_h):
-                return 'results'
-            if self._handlers['launch']._check_launch(screenshot, view_w, view_h):
-                return 'launch'
-            return current
+        # Allow transient loading/animation frames. If no known state has
+        # appeared for too long, return to idle so the next loop acquires Lobby
+        # (or another known state) again.
+        now = time.monotonic()
+        if self._state_unseen_since is None:
+            self._state_unseen_since = now
+        elif now - self._state_unseen_since >= _STATE_RECOVERY_TIMEOUT:
+            self._recovery_count += 1
+            image_path = self._save_recovery_screenshot(
+                screenshot, current, self._recovery_count)
+            self.log_message.emit(
+                'warn',
+                'State %s not detected for %.0fs; recovery #%d%s' %
+                (current, now - self._state_unseen_since,
+                 self._recovery_count,
+                 ' (saved: %s)' % image_path if image_path else ''))
+            if self._recovery_count >= _MAX_CONSECUTIVE_RECOVERIES:
+                self.log_message.emit(
+                    'err',
+                    'Screen remains unknown after %d recoveries; check the '
+                    'emulator window and the saved recovery screenshots.' %
+                    self._recovery_count)
+            self._state_unseen_since = None
+            return BotState.IDLE.value
 
-        # idle/lobby/launch → ตรวจทุกตัว
+        return current
+
+    def _scan_all_stages(self, screenshot, view_w, view_h):
+        """Return the visible known stage, or None if the screen is unknown."""
+        # Results first prevents an end dialog from being mistaken for the
+        # underlying lobby; Lobby is checked before Gameplay.
         for stage_name in ['results', 'prep', 'lobby', 'gameplay', 'launch']:
             handler = self._handlers.get(stage_name)
             if handler is None:
@@ -224,6 +235,20 @@ class BotThread(QThread):
             check_method = getattr(handler, '_check_%s' % stage_name, None)
             if check_method and check_method(screenshot, view_w, view_h):
                 return stage_name
+        return None
 
-        return current
+    @staticmethod
+    def _save_recovery_screenshot(screenshot, state, recovery_count):
+        """Save evidence only when recovery fires, never on normal loops."""
+        try:
+            folder = Path(__file__).resolve().parents[1] / 'debug' / 'recovery'
+            folder.mkdir(parents=True, exist_ok=True)
+            filename = 'unknown_%s_%s_%d.png' % (
+                state, time.strftime('%Y%m%d_%H%M%S'), recovery_count)
+            path = folder / filename
+            screenshot.save(path)
+            return str(path)
+        except Exception as exc:
+            log.warning('Could not save recovery screenshot: %s', exc)
+            return None
 

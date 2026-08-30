@@ -21,6 +21,7 @@ class ResultsHandler:
             ('OK',                lambda: self._tap_retry('OK')),
             ('Confirm',           lambda: self._tap_retry('Confirm')),
             ('Open All',          lambda: self._tap_retry('Open All')),
+            ('Overtake OK',          lambda: self._tap_retry('Overtake OK')),
         ]
         for point_name, action in checks:
             result = self._detect(screenshot, view_w, view_h, point_name)
@@ -42,7 +43,7 @@ class ResultsHandler:
 
     def _check_results(self, screenshot, view_w, view_h):
         """Check if on results screen (Open All, Confirm, OK, Level Up)."""
-        for name in ['Open All', 'Confirm', 'OK', 'Template Level up']:
+        for name in ['Open All', 'Confirm', 'OK', 'Template Level up','Overtake OK']:
             result = self._detect(screenshot, view_w, view_h, name)
             if result and result.get('found'):
                 return True
@@ -53,15 +54,12 @@ class ResultsHandler:
         coords = cfg.get_coords('results')
         for p in coords:
             if p[0] == point_name:
-                self.app.emulator.tap(p[1], p[2])
+                self.app.emulator.tap(
+                    p[1], p[2], box_w_pct=p[3], box_h_pct=p[4])
                 time.sleep(0.3)
                 return True
         return False
 
     def _tap_retry(self, point_name, retries=2, delay=0.4):
-        for i in range(retries + 1):
-            if self._tap(point_name):
-                return True
-            if i < retries:
-                time.sleep(delay)
-        return False
+        """Tap once; the next loop confirms whether the result advanced."""
+        return self._tap(point_name)

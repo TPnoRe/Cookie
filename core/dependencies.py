@@ -129,9 +129,20 @@ def run_winget_tesseract(on_line=None):
 def _run_streaming(cmd, on_line=None):
     """รัน subprocess และส่งแต่ละบรรทัดออกทาง callback (สำหรับ UI)."""
     try:
+        # Prevent pip/winget from flashing a console window. Their output is
+        # still streamed into the splash UI through stdout.
+        startupinfo = None
+        creationflags = 0
+        if sys.platform == 'win32':
+            startupinfo = subprocess.STARTUPINFO()
+            startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+            startupinfo.wShowWindow = subprocess.SW_HIDE
+            creationflags = subprocess.CREATE_NO_WINDOW
+
         proc = subprocess.Popen(
             cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-            universal_newlines=True, encoding='utf-8', errors='replace')
+            universal_newlines=True, encoding='utf-8', errors='replace',
+            startupinfo=startupinfo, creationflags=creationflags)
         for line in proc.stdout:
             text = line.rstrip()
             if text and on_line:

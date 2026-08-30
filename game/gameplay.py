@@ -1,11 +1,8 @@
 ﻿"""game/gameplay.py -- Gameplay stage handler."""
 import time
 import random
-import logging
 
 from vision.engine import VisionEngine
-
-log = logging.getLogger(__name__)
 
 
 class GameplayHandler:
@@ -16,6 +13,16 @@ class GameplayHandler:
         self.app = bot.app
         self.engine = VisionEngine()
         self._last_jump_time = 0
+        self._entry_jump_tap_count = 0
+        self._fast_start_handled = False
+        self._relay_handled = False
+
+    def reset(self):
+        """Reset per-run gameplay state when entering gameplay."""
+        self._last_jump_time = 0
+        self._entry_jump_tap_count = 0
+        self._fast_start_handled = False
+        self._relay_handled = False
 
     def _get_setting(self, key, default):
         return self.app.config.settings.get(key, default)
@@ -28,32 +35,55 @@ class GameplayHandler:
         fast_start_enabled = bool(self._get_setting('fast_start', True))
         fast_start_delay = float(self._get_setting('fast_start_delay', '1.0'))
 
+        # farm_box: when Jump first appears in a run, tap it five times once.
+        # reset() clears this marker when the bot enters the next gameplay run.
+        if farm_mode == 'farm_box' and self._entry_jump_tap_count == 0:
+            result = self._detect(screenshot, view_w, view_h, 'Fast Start')
+            jump = self._detect(screenshot, view_w, view_h, 'Jump')
+            if jump and jump.get('found') or result and result.get('found'):
+                self.bot.log_message.emit(
+                    'ok', 'farm_box: พบ Fast Start → กด Jump 5 ครั้ง')
+                for _ in range(5):
+                    self._tap('Jump')
+                    time.sleep(0.2)
+                self._entry_jump_tap_count = 1
+            return
+
         # Priority 1: Fast Start (อันดับ 1 ตามสเปค)
-        if fast_start_enabled:
+        if fast_start_enabled and not self._fast_start_handled:
             result = self._detect(screenshot, view_w, view_h, 'Fast Start')
             if result and result.get('found'):
-                time.sleep(fast_start_delay)
-                self._tap('Fast Start')
+                if fast_start_delay > 0:
+                    time.sleep(fast_start_delay)
+                self._fast_start_handled = self._tap('Fast Start')
                 return
 
         # Priority 2: Cookie Relay (อันดับ 2)
-        if cookie_relay_enabled:
+        if cookie_relay_enabled and not self._relay_handled:
             result = self._detect(screenshot, view_w, view_h, 'Cookie Relay')
             if result and result.get('found'):
                 for _ in range(5):
                     self._tap('Cookie Relay')
                     time.sleep(0.1)
+                self._relay_handled = True
                 return
 
-        # Priority 3: Jump (if enabled)
+        # farm_gold / farm_exp: use the configured interval between actions.
+        # Each action is randomly a single jump or a double jump.
         if jump_enabled:
-            now = time.time()
-            if now - self._last_jump_time >= jump_interval:
-                if self._detect_pit(screenshot, view_w, view_h):
-                    self._double_slide()
-                else:
-                    self._double_slide()
-                self._last_jump_time = now
+            now_monotonic = time.monotonic()
+            if now_monotonic - self._last_jump_time >= jump_interval:
+                jump = self._detect(screenshot, view_w, view_h, 'Jump')
+                if jump and jump.get('found'):
+                    if random.choice((True, False)):
+                        self._single_jump()
+                    else:
+                        self._double_jump()
+                    # Set this after the action, ensuring double jump's second
+                    # tap cannot be followed by an early next action.
+                    self._last_jump_time = time.monotonic()
+            return
+
 
     def _detect(self, screenshot, view_w, view_h, point_name):
         cfg = self.app.config
@@ -83,51 +113,15 @@ class GameplayHandler:
         for p in coords:
             if p[0] == point_name:
                 if point_name in ('Cookie Relay', 'Fast Start'):
-                    self.app.emulator.tap_fast(p[1], p[2])
+                    self.app.emulator.tap_fast(p[1], p[2], p[3], p[4])
                 else:
-                    self.app.emulator.tap(p[1], p[2])
+                    self.app.emulator.tap(p[1], p[2], box_w_pct=p[3], box_h_pct=p[4])
                 return True
         return False
 
-    def _detect_pit(self, screenshot, view_w, view_h):
-        try:
-            import cv2
-            import numpy as np
-            from emulator.coords import scale_rect
-
-            rx, ry, rw, rh = scale_rect(
-                view_w, view_h, 36.0, 65.0, 2.0, 2.0)
-            img_w, img_h = screenshot.size
-            x1 = max(0, min(rx, img_w - 1))
-            y1 = max(0, min(ry, img_h - 1))
-            x2 = min(img_w, x1 + max(1, rw))
-            y2 = min(img_h, y1 + max(1, rh))
-
-            if x2 <= x1 or y2 <= y1:
-                return False
-
-            roi = screenshot.crop((x1, y1, x2, y2))
-            roi_np = np.array(roi)
-            avg_color = roi_np.mean(axis=(0, 1))
-
-            return avg_color[0] < 50 and avg_color[1] < 50 and avg_color[2] < 50
-        except Exception:
-            return False
-
     def _single_jump(self):
         self._tap('Jump')
-        
-    def _single_slide(self):
-        self._tap('Slide')
-        
-    def _double_slide(self):
-        cfg = self.app.config
-        coords = cfg.get_coords('gameplay')
-        for p in coords:
-            if p[0] == 'Slide':
-                self.app.emulator.tap(p[1], p[2], hold_ms=2000)
-                return
-            
+
     def _double_jump(self):
         self._tap('Jump')
         time.sleep(0.1)

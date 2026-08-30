@@ -56,14 +56,11 @@ class GitboxHandler:
             coords = self.app.config.get_coords(stage)
             for p in coords:
                 if p[0] == point_name:
-                    self.app.emulator.tap(p[1], p[2])
+                    self.app.emulator.tap(
+                        p[1], p[2], box_w_pct=p[3], box_h_pct=p[4])
                     return True
         return False
 
     def _tap_retry(self, point_name, retries=2, delay=0.4):
-        for i in range(retries + 1):
-            if self._tap(point_name):
-                return True
-            if i < retries:
-                time.sleep(delay)
-        return False
+        """Tap once and let the next captured frame drive any retry."""
+        return self._tap(point_name)

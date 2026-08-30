@@ -15,12 +15,25 @@ import datetime
 LOG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'crash.log')
 
 
+def _format_crash(exc_type, exc_value, exc_tb):
+    return ('=== Crash === %s\n' %
+            datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S') +
+            ''.join(traceback.format_exception(exc_type, exc_value, exc_tb)) +
+            '\n')
+
+
 def _install_excepthook():
     def _hook(exc_type, exc_value, exc_tb):
+        details = _format_crash(exc_type, exc_value, exc_tb)
         with open(LOG_FILE, 'a', encoding='utf-8') as f:
-            f.write('=== Crash === %s\n' % datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
-            traceback.print_exception(exc_type, exc_value, exc_tb, file=f)
-            f.write('\n')
+            f.write(details)
+
+        # Once the main UI exists, display the same report in a modal dialog.
+        qt_app = getattr(sys, '_cookie_bot_qt_app', None)
+        controller = getattr(qt_app, '_cookie_bot_controller', None)
+        if controller is not None:
+            controller.report_error('Unhandled application error', details,
+                                    write_log=False)
     sys.excepthook = _hook
 
 
@@ -30,7 +43,8 @@ def _launch_main(qt_app, splash):
     from core.window import AppWindow
     from ui.app import App
     window = AppWindow(title='Cookie Run Classic Bot')
-    App(window)
+    controller = App(window)
+    qt_app._cookie_bot_controller = controller
     window.run()
 
 
@@ -41,6 +55,7 @@ def main():
 
     from PyQt6.QtWidgets import QApplication
     qt_app = QApplication(sys.argv)
+    sys._cookie_bot_qt_app = qt_app
     qt_app.setStyle('Fusion')
 
     from core.dependencies import check_dependencies

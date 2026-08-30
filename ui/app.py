@@ -2,8 +2,14 @@
 
 หน้า UI ไม่ต้องแตะ core.window โดยตรง (ยกเว้นผ่าน self.window)
 """
+import datetime
+from pathlib import Path
+
 from PyQt6.QtCore import pyqtSignal, QObject
-from PyQt6.QtWidgets import QHBoxLayout, QStackedWidget, QVBoxLayout, QWidget
+from PyQt6.QtWidgets import (
+    QDialog, QHBoxLayout, QLabel, QPlainTextEdit, QPushButton,
+    QStackedWidget, QVBoxLayout, QWidget,
+)
 
 from ui import theme
 from ui.sidebar import Sidebar
@@ -31,6 +37,7 @@ class App:
         self._on_resize = None
         self._detecting_emulator = False
         self._health_check_active = False
+        self._error_dialog_open = False
         self.config = Config()
         self.emulator = EmulatorClient(
             get_settings=lambda: self.config.settings)
@@ -102,6 +109,46 @@ class App:
 
     def show_toast(self, level, text, duration=3000):
         self.toast_widget.show_toast(level, text, duration)
+
+    def report_error(self, title, details, write_log=True):
+        """Write and show a full crash-style error report on the GUI thread."""
+        if not details.startswith('=== Crash ==='):
+            details = ('=== Crash === %s\n%s\n' % (
+                datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                details.rstrip()))
+
+        if write_log:
+            try:
+                log_path = Path(__file__).resolve().parents[1] / 'crash.log'
+                with log_path.open('a', encoding='utf-8') as f:
+                    f.write(details)
+            except OSError:
+                pass
+
+        self.dashboard_push('err', title)
+        if self._error_dialog_open:
+            return
+
+        self._error_dialog_open = True
+        try:
+            dialog = QDialog(self.window.win)
+            dialog.setWindowTitle(title)
+            dialog.setModal(True)
+            dialog.setMinimumSize(760, 460)
+
+            layout = QVBoxLayout(dialog)
+            layout.addWidget(QLabel('An error occurred. The full report is also saved in crash.log.'))
+            report = QPlainTextEdit(dialog)
+            report.setReadOnly(True)
+            report.setPlainText(details)
+            layout.addWidget(report, 1)
+
+            close_button = QPushButton('Close', dialog)
+            close_button.clicked.connect(dialog.accept)
+            layout.addWidget(close_button)
+            dialog.exec()
+        finally:
+            self._error_dialog_open = False
 
     # ── Hook สำหรับหน้าที่ 3 ──────────────────────────────
     def on_resize(self, callback):
@@ -250,7 +297,8 @@ class App:
             self._running = False
             self._bot_thread = None
             self.update_sys_status('ERROR', theme.RED)
-            self.dashboard_push('err', 'Failed to start bot: %s' % str(e))
+            import traceback
+            self.report_error('Failed to start bot', traceback.format_exc())
             return
 
     def stop_bot(self):
@@ -269,6 +317,8 @@ class App:
         if level == 'info' and not self.debug_log:
             return
         self.dashboard_push(level, message)
+        if level in ('err', 'error'):
+            self.report_error('Bot error', message)
 
     def _on_stage_changed(self, stage):
         self.pages['dashboard'].update_stage(stage)
