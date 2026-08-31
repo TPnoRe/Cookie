@@ -32,6 +32,8 @@ _STD_H = 720
 
 # Enable saving OCR debug artifacts (cropped ROI and processed image)
 _SAVE_OCR_DEBUG = True
+# Maximum target dimension (width or height) for OCR upscales to avoid huge images
+_OCR_MAX_DIM = 640
 
 class VisionEngine:
     """Stateless-ish engine: takes screenshot + point config, returns result."""
@@ -254,6 +256,18 @@ class VisionEngine:
             roi_thresh = cv2.bitwise_not(roi_thresh)
 
         pad = 16
+        # Cap upscale so final padded size does not exceed _OCR_MAX_DIM
+        max_inner = max(1, _OCR_MAX_DIM - (2 * pad))
+        if new_w > max_inner or new_h > max_inner:
+            factor = min(max_inner / new_w, max_inner / new_h)
+            new_w = max(1, int(new_w * factor))
+            new_h = max(1, int(new_h * factor))
+            # Recompute resized and threshold at capped size
+            roi_resized = cv2.resize(roi_gray, (new_w, new_h), interpolation=cv2.INTER_LANCZOS4)
+            if roi_resized.shape[0] >= 8 and roi_resized.shape[1] >= 8:
+                roi_resized = cv2.medianBlur(roi_resized, 3)
+            _, roi_thresh = cv2.threshold(roi_resized, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+
         padded = cv2.copyMakeBorder(
             roi_thresh, pad, pad, pad, pad, cv2.BORDER_CONSTANT, value=255)
 
@@ -266,8 +280,13 @@ class VisionEngine:
                 folder.mkdir(parents=True, exist_ok=True)
                 ts = time.strftime('%Y%m%d_%H%M%S')
                 try:
+                    # Resize original ROI to the same inner size, pad, and save so
+                    # orig and proc images share the same final dimensions.
+                    orig_resized_color = cv2.resize(roi, (new_w, new_h), interpolation=cv2.INTER_LANCZOS4)
+                    orig_resized_rgb = cv2.cvtColor(orig_resized_color, cv2.COLOR_BGR2RGB)
+                    orig_padded_rgb = cv2.copyMakeBorder(orig_resized_rgb, pad, pad, pad, pad, cv2.BORDER_CONSTANT, value=[255, 255, 255])
                     orig_path = folder / f"ocr_{point_name}_{ts}_orig.png"
-                    Image.fromarray(cv2.cvtColor(roi, cv2.COLOR_BGR2RGB)).save(orig_path)
+                    Image.fromarray(orig_padded_rgb).save(orig_path)
                     orig_saved = str(orig_path)
                 except Exception:
                     orig_saved = None
