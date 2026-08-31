@@ -30,6 +30,8 @@ from emulator.coords import scale_rect
 _STD_W = 1280
 _STD_H = 720
 
+# Enable saving OCR debug artifacts (cropped ROI and processed image)
+_SAVE_OCR_DEBUG = True
 
 class VisionEngine:
     """Stateless-ish engine: takes screenshot + point config, returns result."""
@@ -232,11 +234,16 @@ class VisionEngine:
         
         # Then upscale grayscale (faster than upscaling BGR)
         h, w = roi_gray.shape[:2]
-        scale = max(2.5, min(4.0, 70.0 / max(h, 1)))
+        # Balanced scale: 2.5–3.0 (good speed / accuracy tradeoff)
+        scale = max(2.5, min(3.0, 70.0 / max(h, 1)))
         new_w = max(int(w * scale), 1)
         new_h = max(int(h * scale), 1)
         roi_resized = cv2.resize(roi_gray, (new_w, new_h),
                                 interpolation=cv2.INTER_LANCZOS4)
+
+        # Denoise a little to reduce OCR noise
+        if roi_resized.shape[0] >= 8 and roi_resized.shape[1] >= 8:
+            roi_resized = cv2.medianBlur(roi_resized, 3)
 
         _, roi_thresh = cv2.threshold(
             roi_resized, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
@@ -250,11 +257,31 @@ class VisionEngine:
         padded = cv2.copyMakeBorder(
             roi_thresh, pad, pad, pad, pad, cv2.BORDER_CONSTANT, value=255)
 
+        # Save debug images (cropped ROI and processed image) if enabled
+        try:
+            if _SAVE_OCR_DEBUG and point_name:
+                folder = Path(__file__).resolve().parents[1] / 'debug' / 'ocr'
+                folder.mkdir(parents=True, exist_ok=True)
+                ts = time.strftime('%Y%m%d_%H%M%S')
+                try:
+                    orig_path = folder / f"ocr_{point_name}_{ts}_orig.png"
+                    Image.fromarray(cv2.cvtColor(roi, cv2.COLOR_BGR2RGB)).save(orig_path)
+                except Exception:
+                    pass
+                try:
+                    proc_path = folder / f"ocr_{point_name}_{ts}_proc.png"
+                    Image.fromarray(padded).save(proc_path)
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
         try:
             import pytesseract
+            # Use LSTM engine and single-line page segmentation for speed/accuracy
             text = pytesseract.image_to_string(
                 Image.fromarray(padded),
-                config='--psm 7'
+                config='--oem 1 --psm 7'
             ).strip()
         except ImportError:
             text = '[pytesseract not installed]'
