@@ -11,10 +11,9 @@ from vision.engine import VisionEngine
 log = logging.getLogger(__name__)
 
 
-# A missing template for one frame is normal. This only recovers from an
-# unrecognised screen that persists for several seconds.
+# A missing template for one frame is normal. Recovery has been removed
+# to prevent prolonged crashes. Unknown states now just reset to IDLE.
 _STATE_RECOVERY_TIMEOUT = 8.0
-_MAX_CONSECUTIVE_RECOVERIES = 3
 
 
 class BotThread(QThread):
@@ -36,7 +35,6 @@ class BotThread(QThread):
         self._runs = 0
         self._engine = VisionEngine()
         self._state_unseen_since = None
-        self._recovery_count = 0
 
     def run(self):
         #self.log_message.emit('ok', 'Bot started (%s)' % self.farm_mode)
@@ -158,7 +156,6 @@ class BotThread(QThread):
     def reset(self):
         self.state = BotState.IDLE
         self._state_unseen_since = None
-        self._recovery_count = 0
         self._runs = 0
         self._handlers.clear()
         self._loop_interval = 0.3
@@ -188,37 +185,19 @@ class BotThread(QThread):
         current_check = getattr(current_handler, '_check_%s' % current, None)
         if current_check and current_check(screenshot, view_w, view_h):
             self._state_unseen_since = None
-            self._recovery_count = 0
             return current
 
         detected = self._scan_all_stages(screenshot, view_w, view_h)
         if detected:
             self._state_unseen_since = None
-            self._recovery_count = 0
             return detected
 
-        # Allow transient loading/animation frames. If no known state has
-        # appeared for too long, return to idle so the next loop acquires Lobby
-        # (or another known state) again.
+        # If state cannot be detected, reset to IDLE and let the next loop
+        # acquire Lobby (or another known state) again.
         now = time.monotonic()
         if self._state_unseen_since is None:
             self._state_unseen_since = now
         elif now - self._state_unseen_since >= _STATE_RECOVERY_TIMEOUT:
-            self._recovery_count += 1
-            image_path = self._save_recovery_screenshot(
-                screenshot, current, self._recovery_count)
-            self.log_message.emit(
-                'warn',
-                'State %s not detected for %.0fs; recovery #%d%s' %
-                (current, now - self._state_unseen_since,
-                 self._recovery_count,
-                 ' (saved: %s)' % image_path if image_path else ''))
-            if self._recovery_count >= _MAX_CONSECUTIVE_RECOVERIES:
-                self.log_message.emit(
-                    'err',
-                    'Screen remains unknown after %d recoveries; check the '
-                    'emulator window and the saved recovery screenshots.' %
-                    self._recovery_count)
             self._state_unseen_since = None
             return BotState.IDLE.value
 
@@ -236,19 +215,4 @@ class BotThread(QThread):
             if check_method and check_method(screenshot, view_w, view_h):
                 return stage_name
         return None
-
-    @staticmethod
-    def _save_recovery_screenshot(screenshot, state, recovery_count):
-        """Save evidence only when recovery fires, never on normal loops."""
-        try:
-            folder = Path(__file__).resolve().parents[1] / 'debug' / 'recovery'
-            folder.mkdir(parents=True, exist_ok=True)
-            filename = 'unknown_%s_%s_%d.png' % (
-                state, time.strftime('%Y%m%d_%H%M%S'), recovery_count)
-            path = folder / filename
-            screenshot.save(path)
-            return str(path)
-        except Exception as exc:
-            log.warning('Could not save recovery screenshot: %s', exc)
-            return None
 
