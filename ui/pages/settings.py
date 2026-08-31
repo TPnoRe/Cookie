@@ -156,7 +156,7 @@ class Settings(QFrame):
         self._num_fields = {}
         self._loading = True
         for key, title, hint, default in (
-            ('jump_interval', 'JUMP INTERVAL (s)', 'Time between jump taps', '0.80'),
+            ('jump_interval', 'JUMP INTERVAL (s)', 'Time between jump taps', '0.40'),
             ('click_delay_min', 'TAP DELAY MIN (s)', 'Min randomize tap delay', '0.05'),
             ('click_delay_max', 'TAP DELAY MAX (s)', 'Max randomize tap delay', '0.15'),
             ('click_hold', 'TAP HOLD (s)', 'Duration button is held', '0.05'),

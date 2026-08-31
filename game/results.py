@@ -1,6 +1,7 @@
 """game/results.py -- Results stage handler."""
 import time
 import logging
+import random
 
 from vision.engine import VisionEngine
 
@@ -49,13 +50,42 @@ class ResultsHandler:
                 return True
         return False
 
+    def _do_tap(self, x, y, box_w_pct=None, box_h_pct=None, jitter=0.03):
+        """Tap with random positional jitter to avoid bot detection.
+        
+        Args:
+            x: X coordinate (percentage 0-100 or pixel if > 1)
+            y: Y coordinate (percentage 0-100 or pixel if > 1)
+            box_w_pct: Box width percentage (optional)
+            box_h_pct: Box height percentage (optional)
+            jitter: Jitter range (fraction of coordinate for percentages, pixels for pixel coords)
+        """
+        # Detect if coordinates are percentages (0..100) or pixels (> 1)
+        is_pct = x <= 100 and y <= 100
+        
+        if is_pct:
+            # Percentage coordinates: apply jitter as fraction
+            jitter_range = jitter * 100
+            x_jittered = x + random.uniform(-jitter_range, jitter_range)
+            y_jittered = y + random.uniform(-jitter_range, jitter_range)
+            # Clamp to valid range
+            x_jittered = max(0, min(100, x_jittered))
+            y_jittered = max(0, min(100, y_jittered))
+        else:
+            # Pixel coordinates: apply jitter in pixels
+            x_jittered = x + random.uniform(-jitter, jitter)
+            y_jittered = y + random.uniform(-jitter, jitter)
+        
+        self.app.emulator.tap(x_jittered, y_jittered, box_w_pct=box_w_pct, box_h_pct=box_h_pct)
+        # Random delay after tap to vary timing (0.02-0.12s)
+        time.sleep(random.uniform(0.02, 0.12))
+
     def _tap(self, point_name):
         cfg = self.app.config
         coords = cfg.get_coords('results')
         for p in coords:
             if p[0] == point_name:
-                self.app.emulator.tap(
-                    p[1], p[2], box_w_pct=p[3], box_h_pct=p[4])
+                self._do_tap(p[1], p[2], box_w_pct=p[3], box_h_pct=p[4])
                 time.sleep(0.3)
                 return True
         return False

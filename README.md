@@ -105,7 +105,7 @@ Settings are stored in `config.json` (auto-created next to `main.pyw`):
 |---|---|---|
 | `emulator` | `LDPlayer` | Emulator type to auto-detect (`LDPlayer`, `MuMu`, `Nox`, `BlueStacks`) |
 | `farm_mode` | `farm_box` | See [Farm Modes](#-farm-modes) |
-| `jump_interval` | `0.80` | Min seconds between jumps during gameplay |
+| `jump_interval` | `0.40` | Min seconds between jumps during gameplay |
 | `click_delay_min` | `0.05` | Random pre-click delay — minimum (s) |
 | `click_delay_max` | `0.15` | Random pre-click delay — maximum (s) |
 | `click_hold` | `0.05` | Hold duration of each tap (s) |

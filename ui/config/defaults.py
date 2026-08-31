@@ -3,7 +3,7 @@
 DEFAULT_SETTINGS = {
     'emulator': 'Auto Detect',
     'farm_mode': 'farm_box',
-    'jump_interval': '0.80',
+    'jump_interval': '0.40',
     'click_delay_min': '0.05',
     'click_delay_max': '0.15',
     'click_hold': '0.10',

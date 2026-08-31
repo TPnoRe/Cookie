@@ -35,18 +35,18 @@ class GameplayHandler:
         fast_start_enabled = bool(self._get_setting('fast_start', True))
         fast_start_delay = float(self._get_setting('fast_start_delay', '1.0'))
 
-        # farm_box: when Jump first appears in a run, tap it five times once.
+        # farm_box: when Jump first appears in a run, tap it quickly.
         # reset() clears this marker when the bot enters the next gameplay run.
         if farm_mode == 'farm_box' and self._entry_jump_tap_count == 0:
             result = self._detect(screenshot, view_w, view_h, 'Fast Start')
             jump = self._detect(screenshot, view_w, view_h, 'Jump')
             if (jump and jump.get('found')) or (result and result.get('found')):
-                taps = random.randint(5, 10)
+                taps = random.randint(2, 4)
                 self.bot.log_message.emit(
-                    'ok', f'farm_box: พบ Fast Start → กด Jump {taps} ครั้ง (delay=0.3)')
+                    'ok', f'farm_box: พบ Fast Start → กด Jump {taps} ครั้ง (delay=0.05)')
                 for _ in range(taps):
                     self._tap('Jump')
-                    time.sleep(0.3)
+                    time.sleep(0.05)
                 self._entry_jump_tap_count = 1
             return
 
@@ -159,5 +159,5 @@ class GameplayHandler:
 
     def _double_jump(self):
         self._tap('Jump')
-        time.sleep(0.1)
+        time.sleep(0.05)
         self._tap('Jump')
