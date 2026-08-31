@@ -40,12 +40,13 @@ class GameplayHandler:
         if farm_mode == 'farm_box' and self._entry_jump_tap_count == 0:
             result = self._detect(screenshot, view_w, view_h, 'Fast Start')
             jump = self._detect(screenshot, view_w, view_h, 'Jump')
-            if jump and jump.get('found') or result and result.get('found'):
+            if (jump and jump.get('found')) or (result and result.get('found')):
+                taps = random.randint(5, 10)
                 self.bot.log_message.emit(
-                    'ok', 'farm_box: พบ Fast Start → กด Jump 5 ครั้ง')
-                for _ in range(5):
+                    'ok', f'farm_box: พบ Fast Start → กด Jump {taps} ครั้ง (delay=0.3)')
+                for _ in range(taps):
                     self._tap('Jump')
-                    time.sleep(0.2)
+                    time.sleep(0.3)
                 self._entry_jump_tap_count = 1
             return
 
@@ -107,16 +108,50 @@ class GameplayHandler:
             return True
         return False
 
+    def _do_tap(self, x, y, box_w_pct=None, box_h_pct=None, jitter=0.03):
+        """Tap with jitter for gameplay taps. x,y are pct coords (0..1) or pixels.
+        If box widths/heights are provided, pass them along to tap/tap_fast.
+        """
+        try:
+            xf = float(x)
+            yf = float(y)
+        except Exception:
+            return False
+        # pct coords
+        if 0.0 <= xf <= 1.0 and 0.0 <= yf <= 1.0:
+            dx = random.uniform(-jitter, jitter)
+            dy = random.uniform(-jitter, jitter)
+            tx = max(0.0, min(1.0, xf + dx))
+            ty = max(0.0, min(1.0, yf + dy))
+        else:
+            dx = random.uniform(-10, 10)
+            dy = random.uniform(-10, 10)
+            tx = xf + dx
+            ty = yf + dy
+        try:
+            if box_w_pct is not None and box_h_pct is not None:
+                # Use tap_fast when box provided (keeps behavior for Fast Start/Cookie Relay)
+                self.app.emulator.tap_fast(tx, ty, box_w_pct, box_h_pct)
+            else:
+                # generic tap
+                self.app.emulator.tap(tx, ty)
+            # small random sleep to vary timing
+            time.sleep(random.uniform(0.02, 0.08))
+            return True
+        except Exception:
+            return False
+
     def _tap(self, point_name):
         cfg = self.app.config
         coords = cfg.get_coords('gameplay')
         for p in coords:
             if p[0] == point_name:
+                # p layout: (name, x, y, box_w_pct, box_h_pct)
                 if point_name in ('Cookie Relay', 'Fast Start'):
-                    self.app.emulator.tap_fast(p[1], p[2], p[3], p[4])
+                    # use tap_fast with jitter
+                    return self._do_tap(p[1], p[2], box_w_pct=p[3], box_h_pct=p[4])
                 else:
-                    self.app.emulator.tap(p[1], p[2], box_w_pct=p[3], box_h_pct=p[4])
-                return True
+                    return self._do_tap(p[1], p[2], box_w_pct=p[3], box_h_pct=p[4])
         return False
 
     def _single_jump(self):
