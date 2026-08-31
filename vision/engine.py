@@ -258,6 +258,8 @@ class VisionEngine:
             roi_thresh, pad, pad, pad, pad, cv2.BORDER_CONSTANT, value=255)
 
         # Save debug images (cropped ROI and processed image) if enabled
+        orig_saved = None
+        proc_saved = None
         try:
             if _SAVE_OCR_DEBUG and point_name:
                 folder = Path(__file__).resolve().parents[1] / 'debug' / 'ocr'
@@ -266,15 +268,18 @@ class VisionEngine:
                 try:
                     orig_path = folder / f"ocr_{point_name}_{ts}_orig.png"
                     Image.fromarray(cv2.cvtColor(roi, cv2.COLOR_BGR2RGB)).save(orig_path)
+                    orig_saved = str(orig_path)
                 except Exception:
-                    pass
+                    orig_saved = None
                 try:
                     proc_path = folder / f"ocr_{point_name}_{ts}_proc.png"
                     Image.fromarray(padded).save(proc_path)
+                    proc_saved = str(proc_path)
                 except Exception:
-                    pass
+                    proc_saved = None
         except Exception:
-            pass
+            orig_saved = None
+            proc_saved = None
 
         try:
             import pytesseract
@@ -324,6 +329,8 @@ class VisionEngine:
             'text': text,
             'roi_rect': roi_rect,
             'elapsed_ms': round(elapsed, 2),
+            'debug_orig': orig_saved,
+            'debug_proc': proc_saved,
         }
 
     # ── Unified detect ──────────────────────────────────────────────────────
