@@ -31,7 +31,8 @@ _STD_W = 1280
 _STD_H = 720
 
 # Enable saving OCR debug artifacts (cropped ROI and processed image)
-_SAVE_OCR_DEBUG = True
+# Tier A: default False — not counted in elapsed, only enabled via save_debug=True
+_SAVE_OCR_DEBUG = False
 # Maximum target dimension (width or height) for OCR upscales to avoid huge images
 _OCR_MAX_DIM = 640
 
@@ -216,13 +217,24 @@ class VisionEngine:
     # ── OCR ─────────────────────────────────────────────────────────────────
     def read_text(self, screenshot, x_pct, y_pct, w_pct, h_pct,
                   view_width, view_height, point_name=None,
-                  resize_to=(1280, 720)):
+                  resize_to=(1280, 720), save_debug=None):
         """Read text from the ROI using pytesseract (optimized for speed).
 
-        ✅ ROI is converted to Grayscale first, then upscaled with LANCZOS
+        ✅ ROI is converted to Grayscale first, then upscaled with CUBIC
         before Otsu thresholding + OCR. This is ~40% faster than upscaling
         in color, with no loss in OCR accuracy since Tesseract works from
         binary/grayscale images anyway.
+
+        Tier A: pre-clamp scale before first resize (avoid duplicate
+        LANCZOS+blur+OTSU), INTER_CUBIC instead of LANCZOS, conditional
+        medianBlur, and disk I/O excluded from elapsed.
+
+        Args:
+            save_debug: None → use global _SAVE_OCR_DEBUG (default False);
+                        True/False → force on/off for this call.
+                        When True, `debug_orig_bgr` (CROPPED) is the ROI
+                        resized to new_w×new_h + pad 16 so it matches
+                        `debug_proc_gray` (PROCESSED) pixel-for-pixel.
 
         Returns:
             dict with 'text', 'roi_rect', 'elapsed_ms', or None on error
@@ -237,18 +249,31 @@ class VisionEngine:
 
         # ⚡ Convert to Grayscale FIRST (smaller memory footprint)
         roi_gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
-        
+
         # Then upscale grayscale (faster than upscaling BGR)
         h, w = roi_gray.shape[:2]
         # Balanced scale: 2.5–3.0 (good speed / accuracy tradeoff)
         scale = max(2.5, min(3.0, 70.0 / max(h, 1)))
         new_w = max(int(w * scale), 1)
         new_h = max(int(h * scale), 1)
-        roi_resized = cv2.resize(roi_gray, (new_w, new_h),
-                                interpolation=cv2.INTER_LANCZOS4)
 
-        # Denoise a little to reduce OCR noise
-        if roi_resized.shape[0] >= 8 and roi_resized.shape[1] >= 8:
+        pad = 16
+        # Cap upscale so final padded size does not exceed _OCR_MAX_DIM
+        # Tier A: pre-clamp before first resize to avoid duplicate work
+        max_inner = max(1, _OCR_MAX_DIM - (2 * pad))
+        if new_w > max_inner or new_h > max_inner:
+            factor = min(max_inner / new_w, max_inner / new_h)
+            new_w = max(1, int(new_w * factor))
+            new_h = max(1, int(new_h * factor))
+
+        # Tier A: INTER_CUBIC ~2× faster than LANCZOS4, quality still high for OTSU
+        roi_resized = cv2.resize(roi_gray, (new_w, new_h),
+                                 interpolation=cv2.INTER_CUBIC)
+
+        # Tier A: conditional denoise — skip on tiny images to save time
+        # Only blur if image is large enough to benefit (≥12px and ≥4000 px total)
+        if (roi_resized.shape[0] >= 12 and roi_resized.shape[1] >= 12
+                and roi_resized.size >= 4000):
             roi_resized = cv2.medianBlur(roi_resized, 3)
 
         _, roi_thresh = cv2.threshold(
@@ -259,63 +284,10 @@ class VisionEngine:
         if np.mean(edge_pixels) < 127:
             roi_thresh = cv2.bitwise_not(roi_thresh)
 
-        pad = 16
-        # Cap upscale so final padded size does not exceed _OCR_MAX_DIM
-        max_inner = max(1, _OCR_MAX_DIM - (2 * pad))
-        if new_w > max_inner or new_h > max_inner:
-            factor = min(max_inner / new_w, max_inner / new_h)
-            new_w = max(1, int(new_w * factor))
-            new_h = max(1, int(new_h * factor))
-            # Recompute resized and threshold at capped size
-            roi_resized = cv2.resize(roi_gray, (new_w, new_h), interpolation=cv2.INTER_LANCZOS4)
-            if roi_resized.shape[0] >= 8 and roi_resized.shape[1] >= 8:
-                roi_resized = cv2.medianBlur(roi_resized, 3)
-            _, roi_thresh = cv2.threshold(roi_resized, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-
         padded = cv2.copyMakeBorder(
             roi_thresh, pad, pad, pad, pad, cv2.BORDER_CONSTANT, value=255)
 
-        # Save debug images (cropped ROI and processed image) if enabled.
-        # orig_show = roi resized to the SAME inner size (new_w × new_h) then
-        # padded 16px, so it matches `padded` (processed) pixel-for-pixel.
-        # This guarantees CROPPED and PROCESSED previews have identical size.
-        orig_show = None
-        try:
-            orig_resized_color = cv2.resize(
-                roi, (new_w, new_h), interpolation=cv2.INTER_LANCZOS4)
-            orig_show = cv2.copyMakeBorder(
-                orig_resized_color, pad, pad, pad, pad,
-                cv2.BORDER_CONSTANT, value=(255, 255, 255))
-        except Exception:
-            orig_show = None
-
-        orig_saved = None
-        proc_saved = None
-        try:
-            if _SAVE_OCR_DEBUG and point_name:
-                folder = Path(__file__).resolve().parents[1] / 'debug' / 'ocr'
-                folder.mkdir(parents=True, exist_ok=True)
-                ts = time.strftime('%Y%m%d_%H%M%S')
-                try:
-                    # Resize original ROI to the same inner size, pad, and save so
-                    # orig and proc images share the same final dimensions.
-                    if orig_show is not None:
-                        orig_resized_rgb = cv2.cvtColor(orig_show, cv2.COLOR_BGR2RGB)
-                        orig_path = folder / f"ocr_{point_name}_{ts}_orig.png"
-                        Image.fromarray(orig_resized_rgb).save(orig_path)
-                        orig_saved = str(orig_path)
-                except Exception:
-                    orig_saved = None
-                try:
-                    proc_path = folder / f"ocr_{point_name}_{ts}_proc.png"
-                    Image.fromarray(padded).save(proc_path)
-                    proc_saved = str(proc_path)
-                except Exception:
-                    proc_saved = None
-        except Exception:
-            orig_saved = None
-            proc_saved = None
-
+        # ── OCR (timed) ───────────────────────────────────────────────────
         try:
             # Use preloaded OCR model when available, else fall back to
             # a direct pytesseract import (lazy). The model is warmed up in
@@ -369,6 +341,45 @@ class VisionEngine:
             elif 'close' in p_lower:
                 is_found = any(k in t_lower for k in ['close', 'ปิด', 'x'])
 
+        # ── Debug images (NOT timed) ──────────────────────────────────────
+        # Tier A: orig_show + disk save excluded from elapsed; only when save_debug True
+        should_save = _SAVE_OCR_DEBUG if save_debug is None else save_debug
+        orig_show = None
+        orig_saved = None
+        proc_saved = None
+        if should_save and point_name:
+            # CROPPED preview: roi resized to SAME inner size then padded 16px
+            # Use INTER_LINEAR (fastest) for preview — not affecting OCR accuracy
+            try:
+                orig_resized_color = cv2.resize(
+                    roi, (new_w, new_h), interpolation=cv2.INTER_LINEAR)
+                orig_show = cv2.copyMakeBorder(
+                    orig_resized_color, pad, pad, pad, pad,
+                    cv2.BORDER_CONSTANT, value=(255, 255, 255))
+            except Exception:
+                orig_show = None
+            try:
+                folder = Path(__file__).resolve().parents[1] / 'debug' / 'ocr'
+                folder.mkdir(parents=True, exist_ok=True)
+                ts = time.strftime('%Y%m%d_%H%M%S')
+                try:
+                    if orig_show is not None:
+                        orig_resized_rgb = cv2.cvtColor(orig_show, cv2.COLOR_BGR2RGB)
+                        orig_path = folder / f"ocr_{point_name}_{ts}_orig.png"
+                        Image.fromarray(orig_resized_rgb).save(orig_path)
+                        orig_saved = str(orig_path)
+                except Exception:
+                    orig_saved = None
+                try:
+                    proc_path = folder / f"ocr_{point_name}_{ts}_proc.png"
+                    Image.fromarray(padded).save(proc_path)
+                    proc_saved = str(proc_path)
+                except Exception:
+                    proc_saved = None
+            except Exception:
+                orig_saved = None
+                proc_saved = None
+
         # Notify debug callback (if set) with the raw image data.
         # orig_show has the SAME size as `padded` so CROPPED/PROCESSED match.
         if VisionEngine._debug_callback and point_name:
@@ -392,7 +403,7 @@ class VisionEngine:
     # ── Unified detect ──────────────────────────────────────────────────────
     def detect(self, screenshot, x_pct, y_pct, w_pct, h_pct,
                view_width, view_height, point_name, detection_type,
-               stage='lobby', threshold=0.8):
+               stage='lobby', threshold=0.8, save_debug=None):
         """Unified entry point: dispatches to template or OCR.
 
         ✅ บังคับให้สองระบบแยกกันชัดเจนตาม detection_type:
@@ -419,9 +430,12 @@ class VisionEngine:
         elif detection_type == 'ocr':
             # OCR ทำงานเฉพาะ Region (ROI) ของจุดนี้ — extract_roi ตัดเฉพาะ
             # พื้นที่ข้อความ x_pct,y_pct,w_pct,h_pct ไม่สแกนทั้งจอ.
+            # Tier A: save_debug None → use _SAVE_OCR_DEBUG (False default);
+            # Coordinates Vision Test ส่ง True เพื่อได้ CROPPED/PROCESSED.
             result = self.read_text(
                 screenshot, x_pct, y_pct, w_pct, h_pct,
-                view_width, view_height, point_name)
+                view_width, view_height, point_name,
+                save_debug=save_debug)
             if result is not None:
                 result['type'] = 'ocr'
             return result

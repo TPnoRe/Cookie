@@ -1121,7 +1121,7 @@ class Coordinates(QFrame):
         det_type = self.app.config.get_detection(name)
         result = engine.detect(
             screenshot, p[1], p[2], p[3], p[4], view_w, view_h,
-            name, det_type, self._stage)
+            name, det_type, self._stage, save_debug=True)
         if result is None:
             self._vision_status.setText('Detection failed')
             return
