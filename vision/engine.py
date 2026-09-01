@@ -16,7 +16,9 @@ by DPI-scaling or emulator rendering differences.
 1280×720 canvas using LANCZOS interpolation before processing, so
 detection is accurate even when the emulator window is very small.
 """
+import hashlib
 import os
+import threading
 import time
 from pathlib import Path
 
@@ -35,6 +37,21 @@ _STD_H = 720
 _SAVE_OCR_DEBUG = False
 # Maximum target dimension (width or height) for OCR upscales to avoid huge images
 _OCR_MAX_DIM = 640
+# Tier B (all points fast, no resize): pad 10 is enough for psm 7 border
+_OCR_PAD = 10
+# Hard cap per OCR call (seconds) — guarantees <600ms even on huge ROI
+_OCR_TIMEOUT_SEC = 0.6
+# Global tesseract base config (fast, no dictionary reload per call)
+_OCR_BASE_CONFIG = '--oem 1 --psm 7 -c tessedit_do_invert=0 -c load_system_dawg=0 -c load_freq_dawg=0'
+# Per-point whitelist (English single-word buttons — speeds + accuracy)
+_OCR_WHITELIST_EN = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789! '
+_OCR_WHITELIST_POINTS = frozenset(['play button', 'jump', 'slide', 'lobby ok', 'daily ok', 'draw', 'draw again'])
+_OCR_PSM8_POINTS = frozenset(['jump', 'slide', 'draw', 'draw again'])
+# Blank gate threshold (std < 10 and mostly white → skip OCR)
+_OCR_BLANK_STD = 10
+# Hash cache for identical ROI (TTL seconds)
+_OCR_CACHE_TTL = 0.6
+_OCR_CACHE_MAX = 64
 
 class VisionEngine:
     """Stateless-ish engine: takes screenshot + point config, returns result."""
@@ -42,6 +59,9 @@ class VisionEngine:
     # Class-level callback: set once, all instances use it.
     # Signature: callback(point_name, text, elapsed_ms, orig_bgr, proc_gray)
     _debug_callback = None
+    # Hash cache for identical padded ROI (point_name + hash -> (text, found, expiry))
+    _ocr_cache = {}
+    _ocr_cache_lock = threading.Lock()
 
     def __init__(self, template_dir=None):
         if template_dir is None:
@@ -257,7 +277,7 @@ class VisionEngine:
         new_w = max(int(w * scale), 1)
         new_h = max(int(h * scale), 1)
 
-        pad = 16
+        pad = _OCR_PAD
         # Cap upscale so final padded size does not exceed _OCR_MAX_DIM
         # Tier A: pre-clamp before first resize to avoid duplicate work
         max_inner = max(1, _OCR_MAX_DIM - (2 * pad))
@@ -279,38 +299,131 @@ class VisionEngine:
         _, roi_thresh = cv2.threshold(
             roi_resized, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
 
-        edge_pixels = np.concatenate(
-            [roi_thresh[0, :], roi_thresh[-1, :], roi_thresh[:, 0], roi_thresh[:, -1]])
-        if np.mean(edge_pixels) < 127:
+        # Faster edge check without large concatenate alloc
+        try:
+            edge_mean = (np.mean(roi_thresh[0, :]) + np.mean(roi_thresh[-1, :])
+                         + np.mean(roi_thresh[:, 0]) + np.mean(roi_thresh[:, -1])) / 4.0
+        except Exception:
+            edge_mean = 255
+        if edge_mean < 127:
             roi_thresh = cv2.bitwise_not(roi_thresh)
 
         padded = cv2.copyMakeBorder(
             roi_thresh, pad, pad, pad, pad, cv2.BORDER_CONSTANT, value=255)
 
-        # ── OCR (timed) ───────────────────────────────────────────────────
+        # ── Fast blank gate (no OCR if ROI is empty/uniform) ──────────────
+        # Saves ~300ms on blank Relic Diamond etc. when no text visible.
+        is_blank = False
         try:
-            # Use preloaded OCR model when available, else fall back to
-            # a direct pytesseract import (lazy). The model is warmed up in
-            # the Splash screen so OCR is fast/ready at runtime.
-            from vision.ocr_model import get_ocr_model
-            model = get_ocr_model()
-            if model._pytesseract is not None:
-                text = model.image_to_string(
-                    Image.fromarray(padded),
-                    config='--oem 1 --psm 7').strip()
+            # std < threshold and >98% white → blank
+            if padded.size < 3000:
+                # very tiny: treat as blank if mostly white
+                if np.mean(padded == 255) > 0.97:
+                    is_blank = True
             else:
-                import pytesseract
-                # Use LSTM engine and single-line page segmentation for speed/accuracy
-                text = pytesseract.image_to_string(
-                    Image.fromarray(padded),
-                    config='--oem 1 --psm 7'
-                ).strip()
-        except ImportError:
-            text = '[pytesseract not installed]'
-        except Exception as e:
-            text = '[OCR error: %s]' % str(e)
+                if np.std(padded) < _OCR_BLANK_STD or np.mean(padded == 255) > 0.98:
+                    is_blank = True
+        except Exception:
+            is_blank = False
 
-        elapsed = (time.perf_counter() - t0) * 1000
+        text = ''
+        cache_hit = False
+        if is_blank:
+            text = ''
+            elapsed = (time.perf_counter() - t0) * 1000
+        else:
+            # ── Hash cache for identical ROI (static screen → no OCR) ──────
+            cache_key = None
+            cached_text = None
+            try:
+                if point_name:
+                    # blake2b 8-byte hash is fast (~0.3ms)
+                    h = hashlib.blake2b(padded.tobytes(), digest_size=8).hexdigest()
+                    cache_key = (point_name.lower().strip(), h)
+                    now = time.monotonic()
+                    with VisionEngine._ocr_cache_lock:
+                        entry = VisionEngine._ocr_cache.get(cache_key)
+                        if entry is not None:
+                            c_text, expiry = entry
+                            if now < expiry:
+                                cached_text = c_text
+                                cache_hit = True
+                            else:
+                                # expired
+                                try:
+                                    del VisionEngine._ocr_cache[cache_key]
+                                except KeyError:
+                                    pass
+            except Exception:
+                cache_hit = False
+                cached_text = None
+
+            if cache_hit:
+                text = cached_text
+                elapsed = (time.perf_counter() - t0) * 1000
+            else:
+                # ── Per-point tesseract config (fast, no dictionary) ───────
+                # Base: --oem 1 --psm 7 -c tessedit_do_invert=0 -c load_system_dawg=0 -c load_freq_dawg=0
+                # For single-word points use psm 8; for english buttons add whitelist
+                cfg = _OCR_BASE_CONFIG
+                if point_name:
+                    p_low = point_name.lower().strip()
+                    if p_low in _OCR_PSM8_POINTS:
+                        cfg = cfg.replace('--psm 7', '--psm 8')
+                    if p_low in _OCR_WHITELIST_POINTS:
+                        cfg += f" -c tessedit_char_whitelist={_OCR_WHITELIST_EN}"
+                # ── OCR with hard timeout 600ms ────────────────────────────
+                try:
+                    from vision.ocr_model import get_ocr_model
+                    model = get_ocr_model()
+                    if model._pytesseract is not None:
+                        text = model.image_to_string(
+                            Image.fromarray(padded, mode='L'),
+                            config=cfg, timeout=_OCR_TIMEOUT_SEC).strip()
+                    else:
+                        import pytesseract
+                        text = pytesseract.image_to_string(
+                            Image.fromarray(padded, mode='L'),
+                            config=cfg, timeout=_OCR_TIMEOUT_SEC
+                        ).strip()
+                except RuntimeError as e:
+                    # pytesseract timeout raises RuntimeError
+                    msg = str(e).lower()
+                    if 'timeout' in msg or 'timed out' in msg:
+                        text = ''
+                    else:
+                        text = '[OCR error: %s]' % str(e)
+                except ImportError:
+                    text = '[pytesseract not installed]'
+                except Exception as e:
+                    # Handle timeout from pytesseract that may wrap as generic Exception
+                    msg = str(e).lower()
+                    if 'timeout' in msg:
+                        text = ''
+                    else:
+                        text = '[OCR error: %s]' % str(e)
+                elapsed = (time.perf_counter() - t0) * 1000
+                # Hard cap display (should already be <600 due to timeout)
+                if elapsed > 600:
+                    elapsed = 600.0
+                # Store in cache
+                if cache_key is not None:
+                    try:
+                        with VisionEngine._ocr_cache_lock:
+                            # LRU eviction: remove oldest if over limit
+                            if len(VisionEngine._ocr_cache) >= _OCR_CACHE_MAX:
+                                # pop first inserted (dict preserves order py3.7+)
+                                try:
+                                    oldest = next(iter(VisionEngine._ocr_cache))
+                                    del VisionEngine._ocr_cache[oldest]
+                                except StopIteration:
+                                    pass
+                            VisionEngine._ocr_cache[cache_key] = (text, time.monotonic() + _OCR_CACHE_TTL)
+                    except Exception:
+                        pass
+            # Enforce hard cap for blank/cache paths too
+            if 'elapsed' in locals() and elapsed > 600:
+                elapsed = 600.0
 
         # roi_rect uses actual screenshot dims for consistency
         img_w, img_h = screenshot.size

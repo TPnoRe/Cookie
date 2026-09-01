@@ -169,6 +169,7 @@ class OcrModel:
                         if lang not in self.available]
 
         # Warm-up: อ่าน OCR เล็กๆ ครั้งเดียวให้โมเดลโหลดเข้า RAM
+        # ใช้ config เดียวกับ runtime (รวม -c flags) เพื่อไม่ให้โหลด dictionary ซ้ำรอบแรก
         t0 = time.perf_counter()
         try:
             import cv2
@@ -176,7 +177,7 @@ class OcrModel:
             img = np.full((20, 80), 255, dtype=np.uint8)
             pytesseract.image_to_string(
                 img, lang='+'.join(self.languages),
-                config='--oem 1 --psm 7')
+                config='--oem 1 --psm 7 -c tessedit_do_invert=0 -c load_system_dawg=0 -c load_freq_dawg=0')
         except Exception:
             pass
         self._warmup_elapsed = (time.perf_counter() - t0) * 1000
@@ -193,9 +194,17 @@ class OcrModel:
         return True
 
     # ── Usage ────────────────────────────────────────────
-    def image_to_string(self, image, config=''):
-        """OCR wrapper — ใช้ภาษา eng. คืนข้อความ."""
+    def image_to_string(self, image, config='', timeout=0):
+        """OCR wrapper — ใช้ภาษา eng. คืนข้อความ.
+
+        Args:
+            timeout: 0 = รอไม่จำกัด, >0 = ตัดที่ N วินาที (เช่น 0.6 = 600ms)
+                     ใช้กับ pytesseract>=0.3.10 (timeout param)
+        """
         if self._pytesseract is None:
             raise RuntimeError('OCR model not loaded')
-        return self._pytesseract.image_to_string(
-            image, lang='+'.join(self.languages), config=config)
+        kwargs = dict(lang='+'.join(self.languages), config=config)
+        # pytesseract 0.3.10+ รองรับ timeout
+        if timeout:
+            kwargs['timeout'] = timeout
+        return self._pytesseract.image_to_string(image, **kwargs)
