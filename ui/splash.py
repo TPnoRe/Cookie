@@ -17,6 +17,8 @@ from PyQt6.QtWidgets import (
     QPlainTextEdit, QProgressBar, QPushButton, QVBoxLayout,
 )
 
+import os
+
 from core.dependencies import (
     check_dependencies, critical_missing, missing_pip_packages,
     missing_tesseract, run_pip_install, run_winget_tesseract, _winget_available,
@@ -38,8 +40,19 @@ class _InstallWorker(QThread):
     def run(self):
         if self._task == 'pip':
             ok = run_pip_install(self._packages, on_line=self._emit_line)
-        else:
+        elif self._task == 'winget':
             ok = run_winget_tesseract(on_line=self._emit_line)
+        elif self._task == 'ocr_model':
+            # โหลด + อุ่นเครื่อง OCR ล่วงหน้า (ทำใน background thread)
+            try:
+                from vision.ocr_model import get_ocr_model
+                model = get_ocr_model()
+                ok = model.load()
+            except Exception as e:
+                self._emit_line('[OCR load error: %s]' % e)
+                ok = False
+        else:
+            ok = False
         self.done.emit(ok)
 
     def _emit_line(self, text):
@@ -204,7 +217,7 @@ class SplashWindow(QDialog):
         elif missing_tesseract(self._checks) and _winget_available():
             self._stage_tesseract()
         else:
-            self._finish_flow()
+            self._stage_load_ocr_model()
 
     def _stage_pip(self, packages):
         self._set_progress(
@@ -223,7 +236,7 @@ class SplashWindow(QDialog):
         if missing_tesseract(self._checks) and _winget_available():
             self._stage_tesseract()
         else:
-            self._finish_flow()
+            self._stage_load_ocr_model()
 
     def _stage_tesseract(self):
         self._set_progress(70, 'กำลังติดตั้ง Tesseract OCR (winget)...')
@@ -239,6 +252,34 @@ class SplashWindow(QDialog):
                              '(ระบบอ่านข้อความอาจใช้ไม่ได้)]')
         self._checks = check_dependencies()
         self._refresh()
+        self._stage_load_ocr_model()
+
+    # ── โหลด OCR model ล่วงหน้า (ตอนเปิดโปรแกรม) ──────────
+    def _stage_load_ocr_model(self):
+        """โหลด OCR model — ครั้งแรกโหลดเต็ม+บันทึกแคช, รอบหลังใช้แคชเร็ว."""
+        if missing_tesseract(self._checks):
+            self._append_log('[ข้าม: ไม่มี Tesseract — OCR ใช้ไม่ได้]')
+            self._finish_flow()
+            return
+        try:
+            from vision.ocr_model import get_ocr_model, CACHE_FILE
+            model = get_ocr_model()
+            if os.path.isfile(CACHE_FILE):
+                self._set_progress(95, 'ใช้ OCR model จากแคช (พร้อมใช้ทันที)…')
+                self._start_worker('ocr_model', [], self._after_ocr_model)
+            else:
+                self._set_progress(95, 'กำลังโหลด OCR model (ครั้งแรก)…')
+                self._animate_to(99)
+                self._start_worker('ocr_model', [], self._after_ocr_model)
+        except Exception:
+            self._finish_flow()
+
+    def _after_ocr_model(self, ok):
+        self._stop_anim()
+        if ok:
+            self._append_log('[โหลด OCR model เสร็จสิ้น — พร้อมอ่านข้อความ]')
+        else:
+            self._append_log('[OCR model โหลดไม่สำเร็จ (อ่านข้อความอาจช้า/ใช้ไม่ได้)]')
         self._finish_flow()
 
     def _finish_flow(self):

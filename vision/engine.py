@@ -38,6 +38,10 @@ _OCR_MAX_DIM = 640
 class VisionEngine:
     """Stateless-ish engine: takes screenshot + point config, returns result."""
 
+    # Class-level callback: set once, all instances use it.
+    # Signature: callback(point_name, text, elapsed_ms, orig_bgr, proc_gray)
+    _debug_callback = None
+
     def __init__(self, template_dir=None):
         if template_dir is None:
             template_dir = str(Path(__file__).parent / 'templates')
@@ -271,7 +275,20 @@ class VisionEngine:
         padded = cv2.copyMakeBorder(
             roi_thresh, pad, pad, pad, pad, cv2.BORDER_CONSTANT, value=255)
 
-        # Save debug images (cropped ROI and processed image) if enabled
+        # Save debug images (cropped ROI and processed image) if enabled.
+        # orig_show = roi resized to the SAME inner size (new_w × new_h) then
+        # padded 16px, so it matches `padded` (processed) pixel-for-pixel.
+        # This guarantees CROPPED and PROCESSED previews have identical size.
+        orig_show = None
+        try:
+            orig_resized_color = cv2.resize(
+                roi, (new_w, new_h), interpolation=cv2.INTER_LANCZOS4)
+            orig_show = cv2.copyMakeBorder(
+                orig_resized_color, pad, pad, pad, pad,
+                cv2.BORDER_CONSTANT, value=(255, 255, 255))
+        except Exception:
+            orig_show = None
+
         orig_saved = None
         proc_saved = None
         try:
@@ -282,12 +299,11 @@ class VisionEngine:
                 try:
                     # Resize original ROI to the same inner size, pad, and save so
                     # orig and proc images share the same final dimensions.
-                    orig_resized_color = cv2.resize(roi, (new_w, new_h), interpolation=cv2.INTER_LANCZOS4)
-                    orig_resized_rgb = cv2.cvtColor(orig_resized_color, cv2.COLOR_BGR2RGB)
-                    orig_padded_rgb = cv2.copyMakeBorder(orig_resized_rgb, pad, pad, pad, pad, cv2.BORDER_CONSTANT, value=[255, 255, 255])
-                    orig_path = folder / f"ocr_{point_name}_{ts}_orig.png"
-                    Image.fromarray(orig_padded_rgb).save(orig_path)
-                    orig_saved = str(orig_path)
+                    if orig_show is not None:
+                        orig_resized_rgb = cv2.cvtColor(orig_show, cv2.COLOR_BGR2RGB)
+                        orig_path = folder / f"ocr_{point_name}_{ts}_orig.png"
+                        Image.fromarray(orig_resized_rgb).save(orig_path)
+                        orig_saved = str(orig_path)
                 except Exception:
                     orig_saved = None
                 try:
@@ -301,12 +317,22 @@ class VisionEngine:
             proc_saved = None
 
         try:
-            import pytesseract
-            # Use LSTM engine and single-line page segmentation for speed/accuracy
-            text = pytesseract.image_to_string(
-                Image.fromarray(padded),
-                config='--oem 1 --psm 7'
-            ).strip()
+            # Use preloaded OCR model when available, else fall back to
+            # a direct pytesseract import (lazy). The model is warmed up in
+            # the Splash screen so OCR is fast/ready at runtime.
+            from vision.ocr_model import get_ocr_model
+            model = get_ocr_model()
+            if model._pytesseract is not None:
+                text = model.image_to_string(
+                    Image.fromarray(padded),
+                    config='--oem 1 --psm 7').strip()
+            else:
+                import pytesseract
+                # Use LSTM engine and single-line page segmentation for speed/accuracy
+                text = pytesseract.image_to_string(
+                    Image.fromarray(padded),
+                    config='--oem 1 --psm 7'
+                ).strip()
         except ImportError:
             text = '[pytesseract not installed]'
         except Exception as e:
@@ -343,6 +369,15 @@ class VisionEngine:
             elif 'close' in p_lower:
                 is_found = any(k in t_lower for k in ['close', 'ปิด', 'x'])
 
+        # Notify debug callback (if set) with the raw image data.
+        # orig_show has the SAME size as `padded` so CROPPED/PROCESSED match.
+        if VisionEngine._debug_callback and point_name:
+            try:
+                VisionEngine._debug_callback(
+                    point_name, text, round(elapsed, 2), orig_show, padded)
+            except Exception:
+                pass
+
         return {
             'found': is_found,
             'text': text,
@@ -350,6 +385,8 @@ class VisionEngine:
             'elapsed_ms': round(elapsed, 2),
             'debug_orig': orig_saved,
             'debug_proc': proc_saved,
+            'debug_orig_bgr': orig_show,
+            'debug_proc_gray': padded,
         }
 
     # ── Unified detect ──────────────────────────────────────────────────────
@@ -358,9 +395,19 @@ class VisionEngine:
                stage='lobby', threshold=0.8):
         """Unified entry point: dispatches to template or OCR.
 
+        ✅ บังคับให้สองระบบแยกกันชัดเจนตาม detection_type:
+        - 'template' : ใช้ส่งภาพปุ่ม/ไอคอน (ตัวหลัก, เร็ว) — ดำเนินการเฉพาะ ROI
+        - 'ocr'      : อ่านข้อความ เฉพาะพื้นที่ข้อความ (Region) ที่กำหนดผ่าน
+                       x_pct,y_pct,w_pct,h_pct เท่านั้น ไม่สแกนทั้งจอ
+        - อื่นๆ  (default/unknown) ถูกบังคับให้เป็น template หรือคืน error
+          เพื่อกันเผลอรัน OCR นอก Region ที่ระบุ
+
         Returns:
             dict with 'type' plus backend-specific keys
         """
+        if detection_type is None or detection_type == '':
+            detection_type = 'template'
+
         if detection_type == 'template':
             result = self.match_template(
                 screenshot, x_pct, y_pct, w_pct, h_pct,
@@ -370,6 +417,8 @@ class VisionEngine:
             return result
 
         elif detection_type == 'ocr':
+            # OCR ทำงานเฉพาะ Region (ROI) ของจุดนี้ — extract_roi ตัดเฉพาะ
+            # พื้นที่ข้อความ x_pct,y_pct,w_pct,h_pct ไม่สแกนทั้งจอ.
             result = self.read_text(
                 screenshot, x_pct, y_pct, w_pct, h_pct,
                 view_width, view_height, point_name)

@@ -658,6 +658,7 @@ class Coordinates(QFrame):
 
     def _build_vision_overlay(self):
         self._vision_roi = None
+        self._vision_proc_roi = None
         self._vision_overlay = QFrame(self)
         self._vision_overlay.setObjectName('visionOverlay')
         self._vision_overlay.setStyleSheet(
@@ -669,7 +670,7 @@ class Coordinates(QFrame):
 
         card = QFrame(self._vision_overlay)
         card.setObjectName('card')
-        card.setFixedSize(400, 400)
+        card.setFixedSize(600, 430)
         card.setStyleSheet(
             'QFrame#card { background: %s; border: 1px solid %s;'
             ' border-radius: 10px; }' % (theme.BG_CARD, theme.BORDER))
@@ -682,15 +683,50 @@ class Coordinates(QFrame):
         self._vision_head.setFont(theme.qfont(*theme.SECTION_FONT))
         cv.addWidget(self._vision_head)
 
-        self._vision_preview = QLabel(card)
-        self._vision_preview.setFixedHeight(180)
-        self._vision_preview.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._vision_preview.setStyleSheet(
+        # ── Dual preview: CROPPED (left) + PROCESSED (right) ──
+        preview_row = QHBoxLayout()
+        preview_row.setSpacing(8)
+
+        # CROPPED
+        crop_col = QVBoxLayout()
+        crop_col.setSpacing(3)
+        lbl_crop = QLabel('\u25C8  CROPPED', card)
+        lbl_crop.setFont(theme.qfont(theme.FONT_MONO, 7, True))
+        lbl_crop.setStyleSheet('color: %s;' % theme.ACCENT_GLOW)
+        crop_col.addWidget(lbl_crop)
+        self._vision_orig_preview = QLabel(card)
+        self._vision_orig_preview.setFixedHeight(180)
+        self._vision_orig_preview.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._vision_orig_preview.setStyleSheet(
             'QLabel { background: %s; border: 1px solid %s;'
             ' border-radius: 6px; color: %s; }'
             % (theme.BG_INPUT, theme.BORDER, theme.FG_MUTED))
-        self._vision_preview.setText('Click Capture to load')
-        cv.addWidget(self._vision_preview)
+        self._vision_orig_preview.setText('Capture → CROP')
+        crop_col.addWidget(self._vision_orig_preview)
+        preview_row.addLayout(crop_col, 1)
+
+        # PROCESSED
+        proc_col = QVBoxLayout()
+        proc_col.setSpacing(3)
+        lbl_proc = QLabel('\u25C8  PROCESSED', card)
+        lbl_proc.setFont(theme.qfont(theme.FONT_MONO, 7, True))
+        lbl_proc.setStyleSheet('color: %s;' % theme.AMBER)
+        proc_col.addWidget(lbl_proc)
+        self._vision_proc_preview = QLabel(card)
+        self._vision_proc_preview.setFixedHeight(180)
+        self._vision_proc_preview.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._vision_proc_preview.setStyleSheet(
+            'QLabel { background: %s; border: 1px solid %s;'
+            ' border-radius: 6px; color: %s; }'
+            % (theme.BG_INPUT, theme.BORDER, theme.FG_MUTED))
+        self._vision_proc_preview.setText('Test → OCR')
+        proc_col.addWidget(self._vision_proc_preview)
+        preview_row.addLayout(proc_col, 1)
+
+        cv.addLayout(preview_row)
+
+        # Keep backward-compat alias
+        self._vision_preview = self._vision_orig_preview
 
         self._vision_status = QLabel('', card)
         self._vision_status.setFont(theme.qfont(*theme.XS_FONT))
@@ -990,15 +1026,47 @@ class Coordinates(QFrame):
         self._vision_head.setText(
             '\u2736  VISION: %s' % self._vision_point_name.upper())
         self._vision_status.setText('')
-        self._vision_preview.setText('Click Capture to load')
-        self._vision_preview.setPixmap(QPixmap())
+        for lbl, txt in ((self._vision_orig_preview, 'Capture \u2192 CROP'),
+                         (self._vision_proc_preview, 'Test \u2192 OCR')):
+            lbl.setText(txt)
+            lbl.setPixmap(QPixmap())
         self._vision_roi = None
+        self._vision_proc_roi = None
         self._vision_overlay.setGeometry(self.rect())
         self._vision_overlay.setVisible(True)
         self._vision_overlay.raise_()
 
     def _on_close_vision(self):
         self._vision_overlay.setVisible(False)
+
+    # ── Helpers for dual preview ─────────────────────────
+    def _set_preview_bgr(self, label, bgr):
+        """Render BGR numpy array into a QLabel preview."""
+        try:
+            import cv2
+            rgb = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
+            h, w, ch = rgb.shape
+            qimg = QImage(rgb.data, w, h, ch * w, QImage.Format.Format_RGB888)
+            pixmap = QPixmap.fromImage(qimg.copy())
+            scaled = pixmap.scaled(
+                label.size(), Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation)
+            label.setPixmap(scaled)
+        except Exception:
+            pass
+
+    def _set_preview_gray(self, label, gray):
+        """Render grayscale/binary numpy array into a QLabel preview."""
+        try:
+            h, w = gray.shape[:2]
+            qimg = QImage(gray.data, w, h, w, QImage.Format.Format_Grayscale8)
+            pixmap = QPixmap.fromImage(qimg.copy())
+            scaled = pixmap.scaled(
+                label.size(), Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation)
+            label.setPixmap(scaled)
+        except Exception:
+            pass
 
     def _vision_capture(self):
         if not self.app.emulator.connected:
@@ -1023,19 +1091,13 @@ class Coordinates(QFrame):
         if self._vision_roi is None:
             self._vision_status.setText('ROI extraction failed')
             return
-        import cv2
-        rgb = cv2.cvtColor(self._vision_roi, cv2.COLOR_BGR2RGB)
-        h, w, ch = rgb.shape
-        bytes_per_line = ch * w
-        qimg = QImage(rgb.data, w, h, bytes_per_line,
-                      QImage.Format.Format_RGB888)
-        pixmap = QPixmap.fromImage(qimg)
-        scaled = pixmap.scaled(
-            self._vision_preview.size(),
-            Qt.AspectRatioMode.KeepAspectRatio,
-            Qt.TransformationMode.SmoothTransformation)
-        self._vision_preview.setPixmap(scaled)
-        self._vision_status.setText('Captured: %dx%d px' % (w, h))
+        h, w = self._vision_roi.shape[:2]
+        self._set_preview_bgr(self._vision_orig_preview, self._vision_roi)
+        # Reset PROCESSED pane until Test is pressed
+        self._vision_proc_preview.setPixmap(QPixmap())
+        self._vision_proc_preview.setText('Test \u2192 OCR')
+        self._vision_proc_roi = None
+        self._vision_status.setText('Captured: %dx%d px  |  กด Test เพื่อดูภาพ PROCESSED' % (w, h))
 
     def _vision_test(self):
         if self._vision_roi is None:
@@ -1075,10 +1137,25 @@ class Coordinates(QFrame):
             if result.get('click_x') is not None:
                 line += '\nClick: (%d, %d) px' % (
                     result['click_x'], result['click_y'])
+            # Template: show fresh ROI in CROPPED, keep PROCESSED as placeholder
+            dbg = result.get('debug_orig_bgr') if 'debug_orig_bgr' in result else None
+            if dbg is not None:
+                self._set_preview_bgr(self._vision_orig_preview, dbg)
         else:
             text = result.get('text', '')
             ms = result.get('elapsed_ms', 0)
             line = '[OCR] %s: "%s" (%dms)' % (name, text, ms)
+            # OCR: show CROPPED + PROCESSED side by side
+            orig_bgr = result.get('debug_orig_bgr')
+            proc_gray = result.get('debug_proc_gray')
+            if orig_bgr is not None:
+                self._set_preview_bgr(self._vision_orig_preview, orig_bgr)
+                self._vision_roi = orig_bgr
+            if proc_gray is not None:
+                self._set_preview_gray(self._vision_proc_preview, proc_gray)
+                self._vision_proc_roi = proc_gray
+            else:
+                self._vision_proc_preview.setText('(no proc image)')
         self._vision_status.setText(line)
         import os
         import cv2
@@ -1089,7 +1166,8 @@ class Coordinates(QFrame):
         safe_name = name.replace(' ', '_').replace('/', '_')
         debug_path = os.path.join(
             debug_dir, '%s.png' % safe_name)
-        cv2.imwrite(debug_path, self._vision_roi)
+        if self._vision_roi is not None:
+            cv2.imwrite(debug_path, self._vision_roi)
 
     def _vision_save_original(self):
         if self._vision_roi is None:

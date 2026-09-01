@@ -11,5 +11,8 @@ config.json
 .ocr_ready
 emulator/debug/
 */emulator/debug/
+debug/
 *.log
 crash.log
+
+ocr_model_cache.json
