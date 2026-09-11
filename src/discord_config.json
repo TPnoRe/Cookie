@@ -1,0 +1,9 @@
+{
+  "webhook_url": "https://discord.com/api/webhooks/1357723127207039116/UATC7SbN9kuHb9CGBQeVdbSWkJEz_zVesOfKsvDzng5QL_Z4W89p_2PC0eP7EtCN2Hzp",
+  "enabled": true,
+  "notify_boxes": true,
+  "notify_rounds": false,
+  "notify_antibot": true,
+  "notify_status": false,
+  "attach_screenshot": true
+}

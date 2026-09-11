@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CookieRun Classic Bot - กำลังโหลด</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: "Segoe UI", Tahoma, Arial, sans-serif;
+    background: #0f172a;
+    color: #e2e8f0;
+    height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .card {
+    width: 520px;
+    max-width: 92vw;
+    background: #1e293b;
+    border-radius: 16px;
+    padding: 36px 34px 30px;
+    box-shadow: 0 20px 50px rgba(0,0,0,.45);
+    text-align: center;
+  }
+  .logo { font-size: 60px; }
+  h1 { font-size: 22px; margin: 10px 0 4px; color: #fbbf24; }
+  .sub { font-size: 13px; color: #94a3b8; margin-bottom: 22px; }
+  .bar-wrap { height: 10px; border-radius: 6px; background: #0f172a; overflow: hidden; margin-bottom: 18px; }
+  #bar { width: 0%; height: 100%; background: linear-gradient(90deg, #f59e0b, #fbbf24); border-radius: 6px; transition: width .35s ease; }
+  #status { font-size: 13px; color: #cbd5e1; min-height: 19px; margin-bottom: 16px; }
+  ul#pkg { list-style: none; text-align: left; margin-bottom: 16px; }
+  ul#pkg li {
+    display: flex; align-items: center; gap: 10px;
+    padding: 9px 12px; border-radius: 8px; background: #0f172a;
+    margin-bottom: 7px; font-size: 14px;
+  }
+  ul#pkg li .ico { width: 22px; text-align: center; color: #94a3b8; }
+  ul#pkg li .nm { flex: 1; font-weight: 600; color: #f1f5f9; }
+  ul#pkg li .ver { font-size: 12px; color: #94a3b8; }
+  ul#pkg li.ok .ico { color: #22c55e; }
+  ul#pkg li.done .ico { color: #22c55e; }
+  ul#pkg li .badge { font-size: 12px; padding: 2px 9px; border-radius: 20px; }
+  .badge.warn { background: #7f1d1d; color: #fecaca; }
+  .badge.ok { background: #14532d; color: #86efac; }
+  .badge.run { background: #78350f; color: #fde68a; }
+  .actions { display: flex; gap: 10px; justify-content: center; }
+  button {
+    font-size: 14px; padding: 10px 22px; border: none; border-radius: 8px;
+    cursor: pointer; font-weight: 600;
+  }
+  button.primary { background: #f59e0b; color: #0f172a; }
+  button.primary:hover { background: #fbbf24; }
+  button.ghost { background: #334155; color: #e2e8f0; }
+  button.ghost:hover { background: #475569; }
+  button[disabled] { opacity: .5; cursor: not-allowed; }
+  #doneOverlay {
+    position: fixed; inset: 0; background: #0f172a;
+    display: none; align-items: center; justify-content: center;
+    flex-direction: column; gap: 16px; z-index: 10;
+  }
+  #doneOverlay .spinner {
+    width: 34px; height: 34px; border: 4px solid #334155;
+    border-top-color: #fbbf24; border-radius: 50%;
+    animation: spin 1s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  #doneOverlay p { color: #fbbf24; font-size: 17px; font-weight: 600; }
+  .console {
+    text-align: left; background: #0f172a; border-radius: 8px;
+    padding: 10px 12px; font-family: Consolas, monospace; font-size: 12px;
+    color: #86efac; height: 150px; overflow-y: auto; margin-bottom: 14px; display: none;
+    white-space: pre-wrap; word-break: break-all;
+  }
+</style>
+</head>
+<body>
+  <div class="card" id="card">
+    <div class="logo">🍪</div>
+    <h1>CookieRun Classic Bot</h1>
+    <div class="sub" id="subtitle">กำลังตรวจสอบความพร้อมของโปรแกรม...</div>
+
+    <div class="bar-wrap"><div id="bar"></div></div>
+    <div id="status">กำลังตรวจสอบแพ็กเกจ...</div>
+
+    <ul id="pkg"></ul>
+
+    <div class="console" id="console"></div>
+
+    <div class="actions">
+      <button id="installBtn" class="primary" style="display:none">ติดตั้งอัตโนมัติ</button>
+      <button id="retryBtn" class="ghost" style="display:none">ลองตรวจสอบอีกครั้ง</button>
+    </div>
+  </div>
+
+  <div id="doneOverlay">
+    <div class="spinner"></div>
+    <p>ตรวจสอบครบทุกอย่างแล้ว กำลังเปิดโปรแกรม...</p>
+  </div>
+
+<script>
+"use strict";
+var bootUI = {
+  _rows: {},
+  begin: function (pkgs) {
+    var ul = document.getElementById("pkg");
+    ul.innerHTML = "";
+    pkgs.forEach(function (p, i) {
+      var li = document.createElement("li");
+      li.className = "run";
+      li.id = "row-" + i;
+      li.innerHTML = '<span class="ico">…</span>' +
+        '<span class="nm"></span>' +
+        '<span class="version"><span class="badge run">ตรวจสอบ</span></span>';
+      li.querySelector(".nm").textContent = p.name;
+      ul.appendChild(li);
+      bootUI._rows[i] = li;
+    });
+    bootUI.setBar(8);
+    bootUI.setStatus("กำลังตรวจสอบแพ็กเกจใน requirements.txt ...");
+  },
+  row: function (i, ok, label) {
+    var li = bootUI._rows[i];
+    if (!li) return;
+    li.className = ok ? "ok done" : "done";
+    li.querySelector(".ico").textContent = ok ? "✔" : "✘";
+    li.querySelector(".badge").className = "badge " + (ok ? "ok" : "warn");
+    li.querySelector(".badge").textContent = label;
+  },
+  version: function (i, v) {
+    var li = bootUI._rows[i];
+    if (li && v) {
+      var el = document.createElement("span");
+      el.className = "ver";
+      el.textContent = v;
+      li.querySelector(".version").appendChild(el);
+    }
+  },
+  setBar: function (pct) { document.getElementById("bar").style.width = pct + "%"; },
+  setStatus: function (txt) { document.getElementById("status").textContent = txt; },
+  subtitle: function (txt) { document.getElementById("subtitle").textContent = txt; },
+  complete: function () {
+    bootUI.setStatus("พร้อมใช้งาน!");
+    document.getElementById("doneOverlay").style.display = "flex";
+    document.querySelectorAll(".actions button").forEach(function (b) { b.style.display = "none"; });
+  },
+  showMissing: function () {
+    document.getElementById("installBtn").style.display = "inline-block";
+    document.getElementById("retryBtn").style.display = "inline-block";
+    bootUI.setStatus("พบแพ็กเกจที่ยังไม่พร้อม ระบบจะติดตั้งให้อัตโนมัติถ้ากดปุ่มด้านล่าง");
+  },
+  installLine: function (line) {
+    var box = document.getElementById("console");
+    box.style.display = "block";
+    box.textContent += line + "\n";
+    box.scrollTop = box.scrollHeight;
+  },
+  installing: function () {
+    document.getElementById("installBtn").disabled = true;
+    document.getElementById("retryBtn").disabled = true;
+    bootUI.setStatus("กำลังติดตั้งแพ็กเกจที่ขาดหายไป กรุณารอสักครู่...");
+  },
+  readyInstall: function () {
+    document.getElementById("installBtn").disabled = false;
+    document.getElementById("retryBtn").disabled = false;
+    bootUI.setStatus("ติดตั้งสำเร็จแล้ว กำลังตรวจสอบอีกครั้ง...");
+  },
+  get pywebviewApi() {
+    try { return window.pywebview && window.pywebview.api ? window.pywebview.api : null; }
+    catch (e) { return null; }
+  }
+};
+
+function renderResult(r) {
+  var rows = [];
+  var idx = {};
+  bootUI.begin(r.packages.map(function (p) {
+    var short = p.name.split(/[<>=!~]/)[0].trim();
+    idx[short.toLowerCase()] = p.name;
+    return { name: p.name };
+  }));
+  r.packages.forEach(function (p, i) {
+    bootUI.row(i, p.installed, p.installed ? "พร้อมใช้งาน" : "ยังขาด");
+    bootUI.version(i, p.version ? "v" + p.version : "");
+  });
+  return r.all_ok;
+}
+
+document.getElementById("installBtn").addEventListener("click", function () {
+  var api = bootUI.pywebviewApi;
+  if (!api) { bootUI.setStatus("กรุณากดปุ่มเปิดใหม่ ผ่านโปรแกรมบอท (หน้าโหลด)"); return; }
+  bootUI.installing();
+  api.request_install();
+});
+
+document.getElementById("retryBtn").addEventListener("click", function () {
+  var api = bootUI.pywebviewApi;
+  if (!api) { window.location.reload(); return; }
+  bootUI.setStatus("กำลังตรวจสอบอีกครั้ง...");
+  api.request_retry();
+});
+
+var api = null;
+
+function startPolling() {
+  if (api) return;
+  bootUI.subtitle("กำลังตรวจสอบความพร้อมของโปรแกรม (โหมดเว็บ)...");
+  (function poll() {
+    if (api) return;
+    fetch("/api/check-deps", { cache: "no-store" })
+      .then(function (r) { return r.json(); })
+      .then(function (d) {
+        if (api) return;
+        if (renderResult(d)) {
+          bootUI.complete();
+          setTimeout(function () { window.location.href = "/"; }, 900);
+        } else {
+          bootUI.showMissing();
+          setInterval(function () {
+            if (api) return;
+            fetch("/api/check-deps", { cache: "no-store" })
+              .then(function (r) { return r.json(); })
+              .then(function (d2) {
+                if (api) return;
+                renderResult(d2);
+                if (d2.all_ok) {
+                  bootUI.complete();
+                  setTimeout(function () { window.location.href = "/"; }, 900);
+                }
+              });
+          }, 2500);
+        }
+      })
+      .catch(function () { setTimeout(poll, 1200); });
+  })();
+}
+
+window.addEventListener("pywebviewready", function () {
+  try { api = window.pywebview ? window.pywebview.api : null; } catch (e) { api = null; }
+  if (api) bootUI.subtitle("โปรแกรมกำลังเริ่มต้น กรุณารอสักครู่...");
+});
+
+setTimeout(function () {
+  if (!api) startPolling();
+}, 1500);
+</script>
+</body>
+</html>
